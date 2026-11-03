@@ -1,0 +1,797 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MIDNIGHT GROOVE — 3D 온라인 LP바</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,600;0,700;1,600&family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+KR:wght@300;400;500;600;700&family=Noto+Serif+KR:wght@400;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/src/style.css" />
+</head>
+<body>
+  <!-- 3D WebGL Canvas Container -->
+  <div id="scene-container"></div>
+
+  <!-- Hidden / Mini YouTube IFrame Player Container -->
+  <div id="yt-player-wrapper" class="yt-hidden">
+    <div id="yt-player"></div>
+  </div>
+
+  <!-- Welcome Entrance Overlay (unlocks Web Audio API cleanly on first click) -->
+  <div id="entrance-overlay" class="entrance-overlay">
+    <div class="entrance-card">
+      <div class="entrance-vinyl-graphic">
+        <div class="vinyl-disc-intro">
+          <div class="vinyl-grooves"></div>
+          <div class="vinyl-label-intro">
+            <span>33⅓ RPM</span>
+            <strong>MIDNIGHT<br/>GROOVE</strong>
+            <span>STEREO</span>
+          </div>
+        </div>
+      </div>
+      <p class="entrance-subtitle">ANALOG VINYL LOUNGE &amp; LISTENING BAR</p>
+      <h1 class="entrance-title">온라인 LP바 : 미드나잇 그루브</h1>
+      <p class="entrance-desc">
+        앞쪽의 <strong>장르별 인기 LP 책장</strong>이나 좌측의 <strong>💌 찐 유저 추천 사연 LP 코너</strong>로 걸어가보세요.<br/>
+        <strong>1인칭 클로즈업 시점</strong>으로 전환하여 실제 유저들의 사연과 함께 노래를 바로 듣거나,<br/>
+        <strong>가수·제목을 검색해 나만의 음악과 사연을 추천</strong>하고 <strong>2인석 · 4인석 턴테이블</strong>에 올려 감상할 수 있습니다.
+      </p>
+      <div class="entrance-features">
+        <span>🚶 WASD / 방향키 / 바닥 클릭 이동</span>
+        <span>💌 찐 유저 사연 LP 코너 (1인칭 청음 &amp; 사연)</span>
+        <span>✍️ 가수·제목 검색 내 음악 &amp; 사연 추천</span>
+        <span>🛋️ 2인석·4인석 전용 3D 턴테이블</span>
+      </div>
+
+      <div class="entrance-char-select">
+        <span class="char-select-label">플레이할 캐릭터 선택 (남자아이 / 여자아이 중 1명 선택)</span>
+        <div class="char-select-buttons">
+          <button type="button" class="char-choice-btn active" data-gender="male">
+            <span>👦 귀여운 남자아이</span>
+            <small>애즈펌 가르마 댄디컷 &amp; 니트</small>
+          </button>
+          <button type="button" class="char-choice-btn" data-gender="female">
+            <span>👧 귀여운 여자아이</span>
+            <small>시스루뱅 C컬 단발 &amp; 코랄 원피스</small>
+          </button>
+        </div>
+      </div>
+
+      <button id="btn-enter-bar" class="btn-enter-bar">
+        <span>LP바 문 열고 들어가기</span>
+        <small>Enter Bar &amp; Enable Analog Audio</small>
+      </button>
+    </div>
+  </div>
+
+  <!-- Top Header HUD -->
+  <header class="top-hud">
+    <div class="brand-area">
+      <div class="brand-spinning-icon" id="top-vinyl-icon"></div>
+      <div>
+        <div class="brand-badge">3D ANALOG VINYL SPACE</div>
+        <h1 class="brand-title">MIDNIGHT GROOVE <span class="brand-sub">LP BAR</span></h1>
+      </div>
+    </div>
+
+    <!-- Center Status: Character / Held LP / Current Table -->
+    <div class="center-status-bar">
+      <div class="status-pill" id="location-status-pill">
+        <span class="status-dot"></span>
+        <span id="location-status-text">LP바 라운지 산책 중</span>
+      </div>
+
+      <!-- Held LP indicator when character is carrying a record -->
+      <div class="held-lp-pill hidden" id="held-lp-pill">
+        <img id="held-lp-thumb" src="" alt="Held LP" class="held-lp-thumb" />
+        <div class="held-lp-info">
+          <span class="held-lp-tag">손에 들고 있는 LP</span>
+          <strong id="held-lp-title">-</strong>
+        </div>
+        <button id="btn-drop-lp" class="btn-mini-icon" title="LP 내려놓기">✕</button>
+      </div>
+    </div>
+
+    <!-- Right Controls -->
+    <div class="top-actions">
+      <button class="hud-btn hud-btn-accent" id="btn-top-user-corner" title="찐 유저들이 추천한 노래와 사연이 있는 1인칭 LP 코너로 이동">
+        <span>💌 찐 유저 LP 코너</span>
+      </button>
+
+      <button class="hud-btn hud-btn-gold" id="btn-top-recommend-song" title="가수·제목을 검색해 나만의 인생곡과 사연을 추천하기">
+        <span>✍️ 내 음악·사연 추천</span>
+      </button>
+
+      <button class="hud-btn" id="btn-gender-switch" title="플레이 캐릭터(남자아이/여자아이) 전환">
+        <span>👦 캐릭터: <strong id="current-gender-label">남자아이</strong></span>
+      </button>
+
+      <label class="auto-closeup-toggle" title="책장이나 유저 LP 코너 가까이 걸어가면 자동으로 1인칭 클로즈업 시점으로 전환합니다">
+        <input type="checkbox" id="chk-auto-closeup" checked />
+        <span>접근 시 자동 1인칭</span>
+      </label>
+
+      <div class="mood-selector">
+        <button class="hud-btn" id="btn-mood-cycle" title="조명 분위기 전환">
+          <span>🕯️ 조명: <strong id="mood-name">Warm Amber</strong></span>
+        </button>
+      </div>
+
+      <button class="hud-btn" id="btn-toggle-ambient" title="잔잔한 재즈 배경음 및 LP 치지직 노이즈 설정">
+        <span>🎷 재즈 배경음 &amp; 치지직</span>
+      </button>
+
+      <button class="hud-btn" id="btn-toggle-coaster" title="위스키 코스터 방명록">
+        <span>🥃 코스터 방명록</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- Quick Zone Teleport / Camera Bar (Left Side) -->
+  <aside class="zone-nav-panel">
+    <div class="panel-section-title">빠른 시점 / 구역 이동</div>
+    <div class="zone-btn-group">
+      <button class="zone-btn active" data-zone="walk" id="btn-zone-walk">
+        <span>🚶 캐릭터 이동 시점</span>
+        <small>WASD / 마우스 클릭</small>
+      </button>
+      <button class="zone-btn zone-btn-user-corner" data-zone="user-corner" id="btn-zone-user-corner">
+        <span>💌 찐 유저 추천 LP 코너</span>
+        <small>1인칭 사연 감상 &amp; 노래 청음</small>
+      </button>
+      <button class="zone-btn" data-zone="shelves" id="btn-zone-shelves">
+        <span>📚 앞쪽 장르별 LP 책장</span>
+        <small>6개 장르 인기 LP 디깅</small>
+      </button>
+      <button class="zone-btn" data-zone="tables-2p" id="btn-zone-2p">
+        <span>🥂 2인석 테이블 구역</span>
+        <small>테이블 A1 ~ A4 (턴테이블)</small>
+      </button>
+      <button class="zone-btn" data-zone="tables-4p" id="btn-zone-4p">
+        <span>🛋️ 4인석 부스 테이블 구역</span>
+        <small>테이블 B1 ~ B4 (턴테이블)</small>
+      </button>
+    </div>
+
+    <div class="controls-guide-box">
+      <div class="guide-title">조작 안내</div>
+      <ul>
+        <li><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> / <kbd>방향키</kbd> 캐릭터 이동</li>
+        <li><strong>바닥/책장/테이블 클릭</strong> 자동 걸어가기</li>
+        <li><kbd>E</kbd> 또는 <kbd>Space</kbd> 책장 디깅 / 테이블 착석</li>
+        <li><strong>마우스 우클릭 드래그</strong> 카메라 회전 · <strong>휠</strong> 줌</li>
+      </ul>
+    </div>
+  </aside>
+
+  <!-- Floating Proximity Prompt (Appears near Shelf or Table) -->
+  <div id="proximity-prompt" class="proximity-prompt hidden">
+    <div class="proximity-badge" id="proximity-type">LP SHELF</div>
+    <div class="proximity-title" id="proximity-title">JAZZ &amp; BLUE NOTE 책장</div>
+    <div class="proximity-sub" id="proximity-sub">가까이 가서 정면 시점으로 인기 LP들을 둘러보세요</div>
+    <div class="proximity-actions">
+      <button id="btn-proximity-action" class="btn-proximity-primary">
+        <kbd>E</kbd> <span id="proximity-btn-label">책장 정면 클로즈업 보기</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- ==============================================================
+       SHELF CLOSE-UP DIGGING VIEW (1st-Person Front-Facing LP Browsing)
+       ============================================================== -->
+  <section id="shelf-closeup-overlay" class="shelf-closeup-overlay hidden">
+    <div class="shelf-closeup-header">
+      <div class="shelf-header-left">
+        <span class="shelf-genre-badge" id="shelf-modal-badge">GENRE SHELF #01</span>
+        <h2 id="shelf-modal-title">JAZZ &amp; BLUE NOTE</h2>
+        <p id="shelf-modal-desc">깊은 밤 위스키 한 잔과 어울리는 정통 재즈 &amp; 블루노트 명반</p>
+      </div>
+
+      <!-- Genre Shelf Quick Switcher Tabs (Move left/right between front shelves) -->
+      <div class="shelf-tabs" id="shelf-genre-tabs"></div>
+
+      <button id="btn-close-shelf" class="btn-back-walk">
+        <span>↩ 책장에서 물러나기</span>
+        <kbd>ESC</kbd>
+      </button>
+    </div>
+
+    <!-- Main Front-Facing Digging Stage -->
+    <div class="shelf-digging-stage">
+      <button class="shelf-nav-arrow prev" id="btn-lp-prev" title="이전 LP (← 또는 A)">
+        <span>‹</span>
+        <small><kbd>←</kbd> / <kbd>A</kbd></small>
+      </button>
+
+      <!-- 3D Coverflow / Vinyl Crate Flip Stack -->
+      <div class="lp-crate-viewport" id="lp-crate-viewport">
+        <div class="lp-crate-wood-frame">
+          <div class="lp-crate-label-plate" id="crate-front-plate">POPULAR VINYL SELECTION</div>
+        </div>
+        <div class="lp-cards-stage" id="lp-cards-stage">
+          <!-- Dynamically populated LP jacket cards that flip cleanly -->
+        </div>
+      </div>
+
+      <button class="shelf-nav-arrow next" id="btn-lp-next" title="다음 LP (→ 또는 D)">
+        <span>›</span>
+        <small><kbd>→</kbd> / <kbd>D</kbd></small>
+      </button>
+
+      <!-- Selected LP Detailed Inspector Card -->
+      <div class="lp-detail-panel">
+        <div class="lp-detail-top">
+          <span class="lp-detail-index" id="lp-detail-index">01 / 08</span>
+          <span class="lp-detail-rpm" id="lp-detail-rpm">33⅓ RPM · STEREO LP</span>
+        </div>
+        <h3 class="lp-detail-title" id="lp-detail-title">Waltz for Debby</h3>
+        <div class="lp-detail-artist" id="lp-detail-artist">Bill Evans Trio · 1961</div>
+
+        <div class="lp-detail-tags" id="lp-detail-tags">
+          <span class="tag">Cool Jazz</span>
+          <span class="tag">Piano Trio</span>
+        </div>
+
+        <div class="lp-curator-box">
+          <div class="curator-label">🎼 바텐더의 추천 코멘트</div>
+          <p id="lp-detail-desc">빌 에반스의 섬세한 피아노 터치와 스콧 라파로의 베이스가 어우러진 전설적인 라이브 녹음입니다.</p>
+        </div>
+
+        <div class="lp-detail-actions">
+          <button id="btn-random-lp" class="btn-random-dig">
+            <span>🎲 추천곡 랜덤 넘기기</span>
+            <kbd>Space</kbd>
+          </button>
+
+          <button id="btn-pick-lp" class="btn-pick-lp">
+            <span>💿 이 LP판 선택해서 들기</span>
+            <kbd>Enter</kbd>
+          </button>
+        </div>
+
+        <div class="lp-custom-add-row">
+          <button id="btn-open-custom-lp" class="btn-text-link">+ 이 장르 책장에 내 유튜브 LP 추가하기</button>
+          <button id="btn-shelf-open-user-recommend" class="btn-text-link gold-link">💌 가수·제목 검색해서 내 사연과 함께 유저 LP 코너에 추천하기</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="shelf-closeup-footer">
+      <span>💡 <strong>키보드 <kbd>←</kbd><kbd>→</kbd> (<kbd>A</kbd><kbd>D</kbd>)</strong> 또는 <strong>마우스 휠/클릭</strong>으로 LP 자켓을 넘겨보고, <strong><kbd>Space</kbd></strong>로 랜덤 추천곡을 뽑아보세요.</span>
+    </div>
+  </section>
+
+  <!-- ==============================================================
+       USER STORY LP CORNER (1st-Person Listening & Story Reading View)
+       ============================================================== -->
+  <section id="user-corner-overlay" class="user-corner-overlay hidden">
+    <div class="user-corner-header">
+      <div class="uc-header-left">
+        <span class="uc-pov-badge">👁️ 1ST-PERSON LISTENING BOOTH · YOUR MUSIC CORNER</span>
+        <h2>💌 찐 유저 추천 사연 LP 코너</h2>
+        <p>유저들이 직접 검색해 남긴 인생곡과 그날의 사연(Scene)을 1인칭 시점에서 음악과 함께 감상하세요.</p>
+      </div>
+
+      <div class="uc-header-actions">
+        <button id="btn-uc-autoplay" class="uc-pill-btn" title="켜두면 LP를 넘길 때마다 자동으로 바늘을 올려 노래를 바로 재생합니다">
+          <span>🔊 곡 넘길 때 자동 청음: <strong id="uc-autoplay-state">OFF</strong></span>
+        </button>
+
+        <button id="btn-uc-open-recommend" class="uc-recommend-cta">
+          <span>✍️ 내 음악·사연 추천하기</span>
+        </button>
+
+        <button id="btn-uc-goto-shelves" class="uc-pill-btn">
+          <span>📚 일반 장르 책장 보기</span>
+        </button>
+
+        <button id="btn-close-user-corner" class="btn-back-walk">
+          <span>↩ 코너에서 물러나기</span>
+          <kbd>ESC</kbd>
+        </button>
+      </div>
+    </div>
+
+    <!-- Mood Filter & Mood Search Bar (inspired by yourmusic) -->
+    <div class="uc-filter-bar">
+      <div class="uc-mood-tabs" id="uc-mood-tabs">
+        <!-- Populated dynamically: 전체 사연곡 + 8 Moods -->
+      </div>
+      <div class="uc-mood-search">
+        <input type="text" id="uc-mood-input" placeholder="지금 기분이나 듣고 싶은 순간을 적어보세요 (예: 퇴근길 위로, 여름밤 드라이브)" maxlength="60" />
+        <button type="button" id="btn-uc-mood-recommend" class="btn-uc-mood-find">♪ 기분 맞춤 사연곡 찾기</button>
+      </div>
+    </div>
+
+    <!-- Main 1st-Person Stage: Vinyl Crate + Turntable Left / Story Postcard Right -->
+    <div class="user-corner-stage">
+      <button class="shelf-nav-arrow prev" id="btn-uc-prev" title="이전 사연 LP (← 또는 A)">
+        <span>‹</span>
+        <small><kbd>←</kbd> / <kbd>A</kbd></small>
+      </button>
+
+      <!-- 1st-Person Vinyl Crate Flip Stack -->
+      <div class="lp-crate-viewport uc-crate-viewport" id="uc-crate-viewport">
+        <div class="lp-crate-wood-frame uc-crate-wood-frame">
+          <div class="lp-crate-label-plate" id="uc-crate-front-plate">REAL USER STORIES &amp; VINYL ARCHIVE</div>
+        </div>
+        <div class="lp-cards-stage" id="uc-cards-stage">
+          <!-- Dynamically populated User LP jacket cards -->
+        </div>
+      </div>
+
+      <button class="shelf-nav-arrow next" id="btn-uc-next" title="다음 사연 LP (→ 또는 D)">
+        <span>›</span>
+        <small><kbd>→</kbd> / <kbd>D</kbd></small>
+      </button>
+
+      <!-- Right Panel: User Story Postcard + 1st-Person Listening Controls -->
+      <div class="uc-story-panel">
+        <div class="uc-story-top">
+          <div class="uc-story-badges">
+            <span class="lp-detail-index" id="uc-detail-index">01 / 10</span>
+            <span class="uc-mood-badge" id="uc-detail-mood">🌙 혼자 듣는 밤</span>
+          </div>
+          <button type="button" id="btn-uc-heart" class="btn-uc-heart" title="이 사연과 추천곡에 공감 하트 보내기">
+            <span class="heart-icon" id="uc-heart-icon">♡</span>
+            <span id="uc-heart-count">24</span>
+          </button>
+        </div>
+
+        <!-- Song Header with Album Art + Title + Artist + Recommender -->
+        <div class="uc-song-header">
+          <div class="uc-song-cover-wrap" id="uc-song-cover-wrap">
+            <img id="uc-detail-cover" src="" alt="Album Cover" />
+            <div class="uc-vinyl-spin-badge" id="uc-vinyl-spin-badge">33⅓</div>
+          </div>
+          <div class="uc-song-meta">
+            <h3 class="uc-detail-title" id="uc-detail-title">Fine Line</h3>
+            <div class="uc-detail-artist" id="uc-detail-artist">Harry Styles · 2019</div>
+            <div class="uc-detail-recommender" id="uc-detail-recommender">💌 추천인: 강다영 · 27세 · 시흥</div>
+          </div>
+        </div>
+
+        <!-- 1st-Person Instant Listening Player Box -->
+        <div class="uc-listening-box">
+          <div class="uc-listening-controls">
+            <button type="button" id="btn-uc-play-toggle" class="btn-uc-play-main">
+              <span id="uc-play-btn-label">⏸ 1인칭 청음 중 (일시정지)</span>
+            </button>
+            <button type="button" id="btn-uc-needle-drop" class="btn-uc-needle" title="바늘 다시 놓기 (치지직 효과음)">
+              <span>🪡 바늘 다시 놓기</span>
+            </button>
+          </div>
+          <div class="uc-player-status-row">
+            <span class="uc-live-dot" id="uc-live-dot"></span>
+            <span class="uc-player-status" id="uc-player-status">턴테이블 바늘을 올리면 LP 치지직 소리와 함께 노래가 재생됩니다.</span>
+          </div>
+          <!-- Full Song External Links (from yourmusic: YouTube Music / Spotify / Melon) -->
+          <div class="uc-external-links">
+            <span class="ext-label">전곡 감상 링크:</span>
+            <a id="uc-link-yt" href="#" target="_blank" rel="noopener noreferrer" class="ext-chip yt">▶ YouTube Music</a>
+            <a id="uc-link-spotify" href="#" target="_blank" rel="noopener noreferrer" class="ext-chip sp">♫ Spotify</a>
+            <a id="uc-link-melon" href="#" target="_blank" rel="noopener noreferrer" class="ext-chip ml">🍈 Melon</a>
+          </div>
+        </div>
+
+        <!-- User's Personal Story (Scene) Card -->
+        <div class="uc-scene-card">
+          <div class="uc-scene-label">📖 유저가 남긴 사연 &amp; 기억의 장면 (SCENE)</div>
+          <p class="uc-scene-text" id="uc-story-scene"></p>
+        </div>
+
+        <!-- Favorite Lyric Quote (Optional) -->
+        <div class="uc-lyric-card" id="uc-lyric-box">
+          <div class="uc-lyric-label">❝ 마음을 붙잡은 한 줄 가사</div>
+          <blockquote id="uc-story-lyric"></blockquote>
+        </div>
+
+        <!-- Bottom Action Buttons -->
+        <div class="uc-bottom-actions">
+          <button type="button" id="btn-uc-random" class="btn-random-dig">
+            <span>🎲 다른 유저 사연 랜덤 넘기기</span>
+            <kbd>Space</kbd>
+          </button>
+
+          <button type="button" id="btn-uc-pick-lp" class="btn-pick-lp">
+            <span>💿 이 사연 LP 들고 테이블로 가져가기</span>
+            <kbd>Enter</kbd>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="shelf-closeup-footer">
+      <span>💡 <strong>1인칭 사연 감상 모드</strong> — <kbd>←</kbd><kbd>→</kbd> (<kbd>A</kbd><kbd>D</kbd>) 또는 마우스 휠로 다른 유저의 사연 LP를 넘기며 음악을 듣고, <strong>✍️ 내 음악·사연 추천하기</strong>로 나만의 곡을 남겨보세요.</span>
+    </div>
+  </section>
+
+  <!-- ==============================================================
+       TABLE & TURNTABLE CLOSE-UP HUD (2-Person & 4-Person Tables)
+       ============================================================== -->
+  <section id="table-turntable-hud" class="table-turntable-hud hidden">
+    <div class="tt-hud-card">
+      <div class="tt-hud-header">
+        <div>
+          <span class="tt-table-badge" id="tt-table-badge">2인석 테이블</span>
+          <h3 id="tt-table-name">Table A-1 · 창가 2인석 턴테이블</h3>
+        </div>
+        <button id="btn-leave-table" class="btn-leave-table" title="자리에서 일어나기 (ESC)">
+          <span>🚶 자리에서 일어나기</span>
+          <kbd>ESC</kbd>
+        </button>
+      </div>
+
+      <!-- Current LP on this Table's Turntable -->
+      <div class="tt-record-status" id="tt-record-status">
+        <div class="tt-mini-platter" id="tt-mini-platter">
+          <img id="tt-current-cover" src="" alt="LP Cover" class="tt-current-cover hidden" />
+          <div class="tt-empty-disc" id="tt-empty-disc">EMPTY</div>
+        </div>
+        <div class="tt-record-meta">
+          <div class="tt-state-label" id="tt-state-label">턴테이블 대기 중</div>
+          <strong class="tt-track-title" id="tt-track-title">올려진 LP판이 없습니다</strong>
+          <span class="tt-track-artist" id="tt-track-artist">앞쪽 책장에서 LP를 골라오거나 아래 버튼으로 바로 올려보세요</span>
+        </div>
+      </div>
+
+      <!-- If a User-Recommended Story LP is on this table, show its Story & Recommender -->
+      <div id="tt-user-story-box" class="tt-user-story-box hidden">
+        <div class="tt-user-story-head">
+          <span class="tt-user-story-tag">💌 찐 유저 추천 사연 LP</span>
+          <span id="tt-user-story-recommender">추천인: 익명</span>
+        </div>
+        <p id="tt-user-story-scene"></p>
+        <blockquote id="tt-user-story-lyric" class="hidden"></blockquote>
+      </div>
+
+      <!-- Turntable Physical-Style Controls -->
+      <div class="tt-controls-grid">
+        <button id="btn-tt-put-held" class="tt-action-btn highlight hidden">
+          <span>💿 손에 든 LP 턴테이블에 올리기</span>
+        </button>
+
+        <button id="btn-tt-needle" class="tt-action-btn primary">
+          <span id="tt-needle-label">🪡 톤암(바늘) 올리기 · 재생</span>
+        </button>
+
+        <button id="btn-tt-quick-pick" class="tt-action-btn">
+          <span>📚 책장으로 가서 다른 LP 고르기</span>
+        </button>
+      </div>
+
+      <!-- Analog Controls: RPM, Crackle Intensity, Source Mode -->
+      <div class="tt-analog-knobs">
+        <div class="knob-group">
+          <label>회전 속도 (RPM)</label>
+          <div class="rpm-switch">
+            <button class="rpm-btn active" data-rpm="33" id="btn-rpm-33">33⅓</button>
+            <button class="rpm-btn" data-rpm="45" id="btn-rpm-45">45</button>
+          </div>
+        </div>
+
+        <div class="knob-group wide">
+          <label>
+            <span>✨ LP 치지직 소리 (Vinyl Crackle)</span>
+            <strong id="tt-crackle-val">65%</strong>
+          </label>
+          <input type="range" id="tt-crackle-slider" min="0" max="100" value="65" />
+        </div>
+
+        <div class="knob-group wide">
+          <label>
+            <span>🔊 턴테이블 음악 볼륨</span>
+            <strong id="tt-music-val">80%</strong>
+          </label>
+          <input type="range" id="tt-music-slider" min="0" max="100" value="80" />
+        </div>
+      </div>
+
+      <!-- Audio Source Switcher (YouTube + Built-in Analog Synth Hybrid) -->
+      <div class="tt-source-bar">
+        <div class="source-mode-info">
+          <span class="source-label">사운드 엔진:</span>
+          <button id="btn-source-hybrid" class="source-pill active" data-mode="hybrid">YouTube + 아날로그 하이브리드</button>
+          <button id="btn-source-synth" class="source-pill" data-mode="synth">내장 LP 아날로그 신스 전용</button>
+        </div>
+        <div class="source-status-note" id="source-status-note">
+          바늘이 LP에 닿으면 치지직 소리와 함께 음악이 재생됩니다.
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Bottom Persistent Now-Playing Mini Bar -->
+  <footer id="now-playing-bar" class="now-playing-bar hidden">
+    <div class="np-left">
+      <div class="np-spinning-disc" id="np-spinning-disc">
+        <img id="np-cover-img" src="" alt="Cover" />
+      </div>
+      <div class="np-meta">
+        <div class="np-table-tag" id="np-table-tag">2인석 Table A-1에서 재생 중</div>
+        <strong id="np-title">-</strong>
+        <span id="np-artist">-</span>
+      </div>
+    </div>
+
+    <div class="np-center">
+      <button class="np-ctrl-btn" id="btn-np-toggle" title="재생 / 일시정지">⏸ 일시정지</button>
+      <button class="np-ctrl-btn" id="btn-np-needle-drop" title="바늘 다시 놓기 (치지직 효과음)">🪡 바늘 다시 놓기</button>
+      <button class="np-ctrl-btn" id="btn-np-goto-table" title="재생 중인 테이블로 시점 이동">🪑 해당 테이블 보기</button>
+    </div>
+
+    <div class="np-right">
+      <div class="np-slider-item">
+        <span>치지직</span>
+        <input type="range" id="np-crackle-range" min="0" max="100" value="65" />
+      </div>
+      <div class="np-slider-item">
+        <span>볼륨</span>
+        <input type="range" id="np-volume-range" min="0" max="100" value="80" />
+      </div>
+    </div>
+  </footer>
+
+  <!-- ==============================================================
+       AMBIENT SOUND MIXER DRAWER (Moodist Style)
+       ============================================================== -->
+  <aside id="ambient-drawer" class="side-drawer hidden">
+    <div class="drawer-header">
+      <div>
+        <span class="drawer-tag">LOUNGE BGM &amp; VINYL CRACKLE</span>
+        <h3>잔잔한 재즈 배경음 &amp; 치지직 설정</h3>
+      </div>
+      <button id="btn-close-ambient" class="btn-icon-close">✕</button>
+    </div>
+    <p class="drawer-desc">
+      평소 배경음으로는 <strong>잔잔한 재즈 명곡만 랜덤으로 자동 재생</strong>되며,<br/>
+      <strong>LP 치지직 노이즈 효과음은 턴테이블로 음원을 틀 때만</strong> 함께 출력됩니다.
+    </p>
+
+    <div class="ambient-sliders-list">
+      <div class="ambient-item">
+        <div class="ambient-item-top">
+          <span>🎷 잔잔한 재즈 배경음악 (Random Calm Jazz BGM)</span>
+          <strong id="amb-val-bgJazz">48%</strong>
+        </div>
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:6px; font-size:0.75rem; color:var(--accent-teal);">
+          <span id="bg-jazz-current-track">🎵 재생 대기 중</span>
+          <button type="button" id="btn-next-bg-jazz" class="preset-chip" style="flex:0 0 auto; padding:4px 9px;">🎲 다음 재즈곡 랜덤</button>
+        </div>
+        <input type="range" class="amb-slider" data-channel="bgJazz" min="0" max="100" value="48" />
+      </div>
+
+      <div class="ambient-item">
+        <div class="ambient-item-top">
+          <span>💿 LP 바이닐 치지직 노이즈 (음원 틀 때만 작동)</span>
+          <strong id="amb-val-crackle">65%</strong>
+        </div>
+        <input type="range" class="amb-slider" data-channel="crackle" min="0" max="100" value="65" />
+      </div>
+
+      <div class="ambient-item">
+        <div class="ambient-item-top">
+          <span>🌧️ 창밖 밤비 내리는 소리 (선택 환경음)</span>
+          <strong id="amb-val-rain">0%</strong>
+        </div>
+        <input type="range" class="amb-slider" data-channel="rain" min="0" max="100" value="0" />
+      </div>
+
+      <div class="ambient-item">
+        <div class="ambient-item-top">
+          <span>🥂 바 안의 잔잔한 웅성거림 (선택 환경음)</span>
+          <strong id="amb-val-murmur">0%</strong>
+        </div>
+        <input type="range" class="amb-slider" data-channel="murmur" min="0" max="100" value="0" />
+      </div>
+
+      <div class="ambient-item">
+        <div class="ambient-item-top">
+          <span>🥃 온더락 얼음 부딪히는 소리 (선택 환경음)</span>
+          <strong id="amb-val-ice">0%</strong>
+        </div>
+        <input type="range" class="amb-slider" data-channel="ice" min="0" max="100" value="0" />
+      </div>
+
+      <div class="ambient-item">
+        <div class="ambient-item-top">
+          <span>🔥 벽난로 장작 타는 소리 (선택 환경음)</span>
+          <strong id="amb-val-fire">0%</strong>
+        </div>
+        <input type="range" class="amb-slider" data-channel="fire" min="0" max="100" value="0" />
+      </div>
+    </div>
+
+    <div class="ambient-presets">
+      <button class="preset-chip" data-preset="cozy">🎷 잔잔한 재즈 배경음 전용 (기본)</button>
+      <button class="preset-chip" data-preset="rainy">🌧️ 재즈 + 밤비 소리</button>
+      <button class="preset-chip" data-preset="pure-vinyl">💿 음원 재생 시 치지직 강조</button>
+    </div>
+  </aside>
+
+  <!-- ==============================================================
+       WHISKEY COASTER GUESTBOOK MODAL
+       ============================================================== -->
+  <aside id="coaster-drawer" class="side-drawer hidden">
+    <div class="drawer-header">
+      <div>
+        <span class="drawer-tag">WHISKEY COASTER NOTES</span>
+        <h3>위스키 코스터 방명록</h3>
+      </div>
+      <button id="btn-close-coaster" class="btn-icon-close">✕</button>
+    </div>
+    <p class="drawer-desc">테이블 위 코스터(컵받침)에 오늘 밤의 짧은 사연과 추천 LP를 남겨보세요.</p>
+
+    <form id="coaster-form" class="coaster-form">
+      <div class="form-row">
+        <input type="text" id="coaster-nickname" placeholder="닉네임 (예: 새벽의 디거)" maxlength="16" required />
+        <select id="coaster-table-select">
+          <option value="2인석 A-1">2인석 Table A-1</option>
+          <option value="2인석 A-2">2인석 Table A-2</option>
+          <option value="2인석 A-3">2인석 Table A-3</option>
+          <option value="2인석 A-4">2인석 Table A-4</option>
+          <option value="4인석 B-1">4인석 Table B-1</option>
+          <option value="4인석 B-2">4인석 Table B-2</option>
+          <option value="4인석 B-3">4인석 Table B-3</option>
+          <option value="4인석 B-4">4인석 Table B-4</option>
+        </select>
+      </div>
+      <textarea id="coaster-message" rows="2" placeholder="오늘 이 테이블에서 들은 LP와 짧은 메모를 남겨주세요..." maxlength="120" required></textarea>
+      <button type="submit" class="btn-submit-coaster">🥃 코스터에 사연 남기기</button>
+    </form>
+
+    <div id="coaster-list" class="coaster-list"></div>
+  </aside>
+
+  <!-- Custom LP Modal (Add YouTube LP to Shelf) -->
+  <div id="custom-lp-modal" class="modal-backdrop hidden">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3>나만의 LP판 책장에 꽂기</h3>
+        <button id="btn-close-custom-lp" class="btn-icon-close">✕</button>
+      </div>
+      <form id="custom-lp-form" class="custom-lp-form">
+        <label>
+          <span>곡 / 앨범 제목</span>
+          <input type="text" id="custom-lp-title" placeholder="예: Plastic Love (Extended LP Mix)" required />
+        </label>
+        <label>
+          <span>아티스트</span>
+          <input type="text" id="custom-lp-artist" placeholder="예: Mariya Takeuchi" required />
+        </label>
+        <label>
+          <span>YouTube URL 또는 영상 ID (비워두면 아날로그 신스 연주)</span>
+          <input type="text" id="custom-lp-yt" placeholder="예: https://www.youtube.com/watch?v=T_lC2O1oIew" />
+        </label>
+        <label>
+          <span>추천 한마디</span>
+          <input type="text" id="custom-lp-desc" placeholder="내가 가장 좋아하는 밤 산책 LP 명곡" />
+        </label>
+        <div class="modal-actions">
+          <button type="button" id="btn-cancel-custom-lp" class="btn-secondary">취소</button>
+          <button type="submit" class="btn-primary">책장에 LP 추가하기</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ==============================================================
+       USER SONG & STORY RECOMMENDATION MODAL (Adapted from yourmusic)
+       ============================================================== -->
+  <div id="recommend-song-modal" class="modal-backdrop hidden">
+    <div class="modal-box recommend-modal-box">
+      <div class="modal-header">
+        <div>
+          <span class="drawer-tag">YOUR MUSIC · REAL USER LP ARCHIVE</span>
+          <h3>💌 나만의 음악과 사연 추천하기</h3>
+        </div>
+        <button id="btn-close-recommend-modal" class="btn-icon-close">✕</button>
+      </div>
+
+      <p class="recommend-modal-sub">
+        아끼는 노래의 <strong>가수</strong>나 <strong>제목</strong>을 입력해 검색하고, 그 노래에 담긴 나만의 사연(장면)을 남겨주세요.<br/>
+        등록된 곡은 바 안의 <strong>[찐 유저 추천 사연 LP 코너]</strong>에 실제 LP 자켓과 미리듣기 음원으로 꽂힙니다.
+      </p>
+
+      <div class="recommend-form-body">
+        <!-- STEP 1: Artist / Title Search -->
+        <div class="rec-section">
+          <div class="rec-section-label">01 · 노래 찾기 (가수 또는 제목 입력) *</div>
+          <div class="rec-search-row">
+            <input type="text" id="rec-artist-input" placeholder="가수 이름 (예: 아이유, 검정치마, Harry Styles)" maxlength="80" />
+            <input type="text" id="rec-title-input" placeholder="노래 제목 (예: 밤편지, Fine Line, Plastic Love)" maxlength="120" />
+            <button type="button" id="btn-rec-search" class="btn-rec-search">🔍 노래 찾기</button>
+          </div>
+          <div class="rec-search-hint" id="rec-search-note">
+            💡 한글 발음(예: 뉴진스, 키스오브라이프, 마리야 타케우치)이나 가수/제목 중 하나만 입력해도 검색됩니다. (<kbd>Enter</kbd>로 바로 검색)
+          </div>
+          <div class="rec-field-error hidden" id="rec-err-song"></div>
+
+          <!-- Search Results List -->
+          <div id="rec-results-wrap" class="rec-results-wrap hidden">
+            <div class="rec-results-head">
+              <span id="rec-results-count">검색 결과</span>
+              <small>미리듣기(▶)로 확인 후 원하는 곡을 선택하세요</small>
+            </div>
+            <div id="rec-results-list" class="rec-results-list"></div>
+          </div>
+
+          <!-- Confirmation Card: IS THIS RIGHT? YES ♥ / NO (from yourmusic FormScreen) -->
+          <div id="rec-confirm-box" class="rec-confirm-box hidden">
+            <div class="rec-confirm-top">
+              <span class="rec-confirm-tag" id="rec-confirm-status-tag">IS THIS RIGHT? · 이 노래가 맞나요?</span>
+            </div>
+            <div class="rec-confirm-song">
+              <img id="rec-confirm-cover" src="" alt="Cover" class="rec-confirm-cover" />
+              <div class="rec-confirm-meta">
+                <strong id="rec-confirm-title">-</strong>
+                <span id="rec-confirm-artist">-</span>
+                <small id="rec-confirm-album">-</small>
+              </div>
+              <button type="button" id="btn-rec-confirm-preview" class="btn-rec-mini-preview">▶ 30초 미리듣기</button>
+            </div>
+            <div class="rec-confirm-actions">
+              <button type="button" id="btn-rec-confirm-yes" class="btn-confirm-yes">YES ♥ 맞아요</button>
+              <button type="button" id="btn-rec-confirm-no" class="btn-confirm-no">NO · 다른 곡 다시 고르기</button>
+            </div>
+            <div class="rec-field-error hidden" id="rec-err-confirmed"></div>
+          </div>
+        </div>
+
+        <!-- STEP 2: Personal Story (Scene) & Favorite Lyric -->
+        <div class="rec-section">
+          <div class="rec-section-label">02 · 이 노래에 담긴 나만의 사연 / 장면 (SCENE) *</div>
+          <textarea id="rec-scene-input" rows="3" maxlength="500" placeholder="언제, 어디서, 어떤 마음으로 이 노래를 들었나요? 이 노래가 왜 소중한지 당신의 이야기를 들려주세요..."></textarea>
+          <div class="rec-field-error hidden" id="rec-err-scene"></div>
+
+          <label class="rec-sub-field">
+            <span>가장 좋아하는 가사 한 줄 (선택)</span>
+            <input type="text" id="rec-lyric-input" maxlength="200" placeholder="예: We'll be alright — 가장 위로가 되었던 구절을 적어주세요" />
+          </label>
+        </div>
+
+        <!-- STEP 3: Recommender Info & Optional Contact -->
+        <div class="rec-section">
+          <div class="rec-section-label">03 · 추천인 프로필 (선택 · 비워두면 익명 디거로 표시)</div>
+          <div class="rec-profile-row">
+            <input type="text" id="rec-name-input" placeholder="이름 또는 닉네임 (예: 김샤운)" maxlength="30" />
+            <input type="text" id="rec-age-input" placeholder="나이 (예: 27)" maxlength="10" />
+            <input type="text" id="rec-city-input" placeholder="도시/장소 (예: 서울 합정)" maxlength="30" />
+          </div>
+
+          <details class="rec-contact-details">
+            <summary>📬 다른 유저들의 공감 알림 연락처 남기기 (선택사항)</summary>
+            <div class="rec-contact-inner">
+              <div class="rec-contact-types" id="rec-contact-type-group">
+                <button type="button" class="contact-type-btn active" data-type="instagram">Instagram</button>
+                <button type="button" class="contact-type-btn" data-type="email">Email</button>
+                <button type="button" class="contact-type-btn" data-type="phone">Phone</button>
+                <button type="button" class="contact-type-btn" data-type="kakao">KakaoTalk ID</button>
+              </div>
+              <input type="text" id="rec-contact-input" placeholder="@인스타그램 아이디" maxlength="100" />
+              <div class="rec-field-error hidden" id="rec-err-contact"></div>
+              <label class="rec-privacy-label">
+                <input type="checkbox" id="rec-privacy-chk" />
+                <span>연락처 수집에 동의합니다 (사연 선정·소식 안내 외에는 사용되지 않으며 코너 화면에는 공개되지 않습니다)</span>
+              </label>
+              <div class="rec-field-error hidden" id="rec-err-privacy"></div>
+            </div>
+          </details>
+        </div>
+
+        <div class="modal-actions rec-modal-actions">
+          <button type="button" id="btn-rec-cancel" class="btn-secondary">취소</button>
+          <button type="button" id="btn-rec-submit" class="btn-primary btn-rec-submit">💿 사연과 함께 유저 LP 코너에 꽂기</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

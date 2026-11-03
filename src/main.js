@@ -1,0 +1,2144 @@
+import { GENRE_SHELVES, getLPCoverDataURL, getProceduralLPCoverDataURL } from './data/lpCatalog.js';
+import { BAR_TABLES, INITIAL_COASTER_NOTES } from './data/barTables.js';
+import {
+  MOOD_CATEGORIES,
+  getMoodMeta,
+  CONTACT_LABELS,
+  validateSongSubmission,
+  loadUserRecommendedSongs,
+  persistCustomUserSong,
+  normalizeUserSongToLP,
+  loadSavedHeartState,
+  saveHeartState,
+  searchSongsByArtistAndTitle,
+  lookupSongPreviewAndArt,
+  recommendUserSongsByMood,
+  getMusicServiceLinks
+} from './data/userMusicService.js';
+import { AudioEngine } from './audio/AudioEngine.js';
+import { LPBarWorld } from './world/LPBarWorld.js';
+
+const initialUserSongs = loadUserRecommendedSongs();
+
+// Application State
+const state = {
+  shelves: GENRE_SHELVES,
+  tables: BAR_TABLES,
+  coasters: [...INITIAL_COASTER_NOTES],
+
+  // User-Recommended Story Songs (adapted from yourmusic)
+  userSongs: initialUserSongs,
+  filteredUserSongs: [...initialUserSongs],
+  activeMoodFilter: 'all',
+  openUserCorner: false,
+  selectedUserLPIndex: 0,
+  userCornerAutoPlay: false,
+  userCornerPlaying: false,
+  userCornerActiveLP: null,
+  heartState: loadSavedHeartState(),
+
+  // Currently held LP in character's hands
+  heldLP: null,
+
+  // Active shelf close-up state
+  openShelf: null,
+  selectedLPIndex: 0,
+  isRandomFlipping: false,
+
+  // Active seated table & currently playing table across the bar
+  seatedTable: null,
+  playingTableId: null
+};
+
+const audio = new AudioEngine();
+let world = null;
+
+// Helper to apply LP cover image with automatic procedural fallback if external URL fails
+function applyLPCoverImage(imgEl, lp) {
+  if (!imgEl || !lp) return;
+  imgEl.onerror = () => {
+    imgEl.onerror = null;
+    imgEl.src = getProceduralLPCoverDataURL(lp);
+  };
+  imgEl.src = getLPCoverDataURL(lp);
+}
+
+// Toast helper
+function showToast(message) {
+  const container = document.getElementById('toast-container');
+  if (!container) return;
+  const el = document.createElement('div');
+  el.className = 'toast-msg';
+  el.textContent = message;
+  container.appendChild(el);
+  setTimeout(() => el.remove(), 3300);
+}
+
+// Initialize 3D World & UI
+window.addEventListener('DOMContentLoaded', () => {
+  const sceneContainer = document.getElementById('scene-container');
+
+  // Apply persisted heart counts to loaded user songs
+  state.userSongs.forEach((song) => {
+    if (typeof state.heartState.counts[song.id] === 'number') {
+      song.heartCount = state.heartState.counts[song.id];
+    }
+  });
+  state.filteredUserSongs = [...state.userSongs];
+
+  world = new LPBarWorld(sceneContainer, state.shelves, state.tables, {
+    initialUserSongs: state.userSongs,
+    onFootstep: () => audio.playFootstep(),
+    onProximityChange: (prox) => updateProximityPrompt(prox),
+    onEnterShelfCloseup: (shelfData) => openShelfDiggingUI(shelfData),
+    onEnterUserCornerCloseup: () => openUserCornerUI(),
+    onSitAtTable: (tableData) => handleCharacterSatAtTable(tableData)
+  });
+
+  audio.onStatusChange = (statusText) => {
+    const noteEl = document.getElementById('source-status-note');
+    if (noteEl) noteEl.textContent = statusText;
+    const ucStatusEl = document.getElementById('uc-player-status');
+    if (ucStatusEl && state.openUserCorner) ucStatusEl.textContent = statusText;
+  };
+
+  audio.onBgJazzChange = (track) => {
+    const labelEl = document.getElementById('bg-jazz-current-track');
+    if (labelEl && track) {
+      labelEl.textContent = `🎵 ${track.title} — ${track.artist}`;
+    }
+  };
+
+  setupEntranceOverlay();
+  setupTopHUD();
+  setupShelfDiggingUI();
+  setupUserCornerUI();
+  setupRecommendSongModal();
+  setupTableTurntableHUD();
+  setupNowPlayingBar();
+  setupAmbientDrawer();
+  setupCoasterGuestbook();
+  setupCustomLPModal();
+  setupGlobalHotkeys();
+
+  // Pre-seed Table A-1 with a classic Jazz record paused on platter so users can also test immediately
+  const initialJazzLP = state.shelves[0].records[0];
+  state.tables[0].currentLP = initialJazzLP;
+  world.updateTableTurntableVisual(state.tables[0].id);
+});
+
+function syncGenderUI(gender) {
+  world.setPlayerGender(gender);
+  document.querySelectorAll('.char-choice-btn').forEach((b) => {
+    b.classList.toggle('active', b.dataset.gender === gender);
+  });
+  const btnGender = document.getElementById('btn-gender-switch');
+  if (btnGender) {
+    btnGender.innerHTML =
+      gender === 'female'
+        ? '<span>👧 캐릭터: <strong id="current-gender-label">여자아이</strong></span>'
+        : '<span>👦 캐릭터: <strong id="current-gender-label">남자아이</strong></span>';
+  }
+}
+
+// =========================================================================
+// 1. ENTRANCE OVERLAY
+// =========================================================================
+function setupEntranceOverlay() {
+  const overlay = document.getElementById('entrance-overlay');
+  const btnEnter = document.getElementById('btn-enter-bar');
+
+  document.querySelectorAll('.char-choice-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      syncGenderUI(btn.dataset.gender);
+    });
+  });
+
+  btnEnter.addEventListener('click', async () => {
+    await audio.init();
+    audio.playSleeveFlip();
+    overlay.style.opacity = '0';
+    setTimeout(() => overlay.classList.add('hidden'), 480);
+    showToast('🎷 미드나잇 그루브 LP바에 오신 것을 환영합니다! 앞쪽 장르별 LP 책장으로 걸어가 보세요.');
+  });
+}
+
+// =========================================================================
+// 2. TOP HUD & ZONE TELEPORTATION
+// =========================================================================
+function setupTopHUD() {
+  const btnTopUserCorner = document.getElementById('btn-top-user-corner');
+  if (btnTopUserCorner) {
+    btnTopUserCorner.addEventListener('click', () => {
+      closeShelfDiggingUI(false);
+      closeTableTurntableHUD(false);
+      world.enterUserCornerCloseup();
+    });
+  }
+
+  const btnTopRecommend = document.getElementById('btn-top-recommend-song');
+  if (btnTopRecommend) {
+    btnTopRecommend.addEventListener('click', () => {
+      openRecommendSongModal();
+    });
+  }
+
+  const btnGender = document.getElementById('btn-gender-switch');
+  if (btnGender) {
+    btnGender.addEventListener('click', () => {
+      const next = world.playerGender === 'male' ? 'female' : 'male';
+      syncGenderUI(next);
+      showToast(
+        next === 'female'
+          ? '👧 캐릭터가 [귀여운 여자아이]로 변경되었습니다!'
+          : '👦 캐릭터가 [귀여운 남자아이]로 변경되었습니다!'
+      );
+    });
+  }
+
+  const chkAuto = document.getElementById('chk-auto-closeup');
+  chkAuto.addEventListener('change', (e) => {
+    world.autoShelfCloseup = e.target.checked;
+    showToast(
+      e.target.checked
+        ? '📚 책장 및 유저 LP 코너 접근 시 자동 1인칭 클로즈업이 켜졌습니다.'
+        : '📚 책장 및 유저 LP 코너 접근 시 E키 또는 클릭으로 전환합니다.'
+    );
+  });
+
+  // Mood lighting cycle
+  const btnMood = document.getElementById('btn-mood-cycle');
+  const moodNameEl = document.getElementById('mood-name');
+  btnMood.addEventListener('click', () => {
+    const nextName = world.cycleMood();
+    moodNameEl.textContent = nextName;
+    showToast(`🕯️ 바 조명 테마가 [${nextName}] 모드로 변경되었습니다.`);
+  });
+
+  // Drop currently held LP
+  document.getElementById('btn-drop-lp').addEventListener('click', () => {
+    setHeldLP(null);
+    showToast('손에 들고 있던 LP판을 내려놓았습니다.');
+  });
+
+  // Left Zone Navigation Buttons
+  const zoneBtns = document.querySelectorAll('.zone-btn');
+  zoneBtns.forEach((btn) => {
+    btn.addEventListener('click', () => {
+      zoneBtns.forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      const zone = btn.dataset.zone;
+      closeShelfDiggingUI(false);
+      closeUserCornerUI(false);
+      closeTableTurntableHUD(false);
+      world.focusZone(zone);
+
+      if (zone === 'user-corner') {
+        showToast('💌 찐 유저 추천 사연 LP 코너 (1인칭 감상 부스)로 이동했습니다.');
+      } else if (zone === 'shelves') {
+        showToast('📚 앞쪽 장르별 인기 LP 책장 구역으로 이동했습니다.');
+      } else if (zone === 'tables-2p') {
+        showToast('🥂 2인석 테이블 구역 (Table A-1 ~ A-4)으로 이동했습니다.');
+      } else if (zone === 'tables-4p') {
+        showToast('🛋️ 4인석 부스 테이블 구역 (Table B-1 ~ B-4)으로 이동했습니다.');
+      }
+    });
+  });
+}
+
+function highlightZoneButton(zoneKey) {
+  document.querySelectorAll('.zone-btn').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.zone === zoneKey);
+  });
+}
+
+function setHeldLP(lp) {
+  state.heldLP = lp;
+  world.setCharacterHeldLP(lp);
+
+  const pill = document.getElementById('held-lp-pill');
+  const thumb = document.getElementById('held-lp-thumb');
+  const title = document.getElementById('held-lp-title');
+
+  if (lp) {
+    pill.classList.remove('hidden');
+    applyLPCoverImage(thumb, lp);
+    title.textContent = `${lp.title} — ${lp.artist}`;
+  } else {
+    pill.classList.add('hidden');
+  }
+}
+
+function setLocationStatus(text) {
+  const el = document.getElementById('location-status-text');
+  if (el) el.textContent = text;
+}
+
+// =========================================================================
+// 3. PROXIMITY INTERACTION PROMPT
+// =========================================================================
+function updateProximityPrompt(prox) {
+  const promptEl = document.getElementById('proximity-prompt');
+  if (!prox) {
+    promptEl.classList.add('hidden');
+    return;
+  }
+
+  promptEl.classList.remove('hidden');
+  const badgeEl = document.getElementById('proximity-type');
+  const titleEl = document.getElementById('proximity-title');
+  const subEl = document.getElementById('proximity-sub');
+  const btnLabel = document.getElementById('proximity-btn-label');
+  const btnAction = document.getElementById('btn-proximity-action');
+
+  if (prox.type === 'user-corner') {
+    badgeEl.textContent = 'YOUR MUSIC · 1ST-PERSON BOOTH';
+    titleEl.textContent = '💌 찐 유저 추천 사연 LP 코너';
+    subEl.textContent = `유저들이 직접 남긴 사연과 인생곡 ${state.userSongs.length}장이 꽂혀 있습니다. 1인칭 시점으로 사연을 읽으며 바로 들어보세요.`;
+    btnLabel.textContent = '1인칭 사연 감상 & 청음 화면으로 전환';
+    btnAction.onclick = () => world.enterUserCornerCloseup();
+  } else if (prox.type === 'shelf') {
+    badgeEl.textContent = `${prox.data.code} · POPULAR VINYL RACK`;
+    titleEl.textContent = `${prox.data.name} (${prox.data.koName})`;
+    subEl.textContent = prox.data.subtitle;
+    btnLabel.textContent = '책장 정면 클로즈업으로 LP 둘러보기';
+    btnAction.onclick = () => world.enterShelfCloseup(prox.id);
+  } else if (prox.type === 'table') {
+    badgeEl.textContent = prox.data.typeLabel;
+    titleEl.textContent = prox.data.name;
+    if (state.heldLP) {
+      subEl.textContent = `손에 든 [${state.heldLP.title}] LP를 이 테이블의 턴테이블에 올립니다`;
+      btnLabel.textContent = '테이블에 앉아서 LP판 올리고 재생하기';
+    } else if (prox.data.currentLP) {
+      subEl.textContent = `현재 올려진 LP: ${prox.data.currentLP.title} (${prox.data.currentLP.artist})`;
+      btnLabel.textContent = '테이블에 앉아서 턴테이블 조작하기';
+    } else {
+      subEl.textContent = prox.data.desc;
+      btnLabel.textContent = '이 테이블에 앉기';
+    }
+    btnAction.onclick = () => world.sitAtTable(prox.id);
+  }
+}
+
+// =========================================================================
+// 4. FRONT-FACING SHELF CLOSE-UP DIGGING VIEW
+// =========================================================================
+function setupShelfDiggingUI() {
+  // Genre quick tabs inside shelf close-up header
+  const tabsContainer = document.getElementById('shelf-genre-tabs');
+  state.shelves.forEach((shelf) => {
+    const btn = document.createElement('button');
+    btn.className = 'shelf-tab-btn';
+    btn.dataset.shelfId = shelf.id;
+    btn.textContent = shelf.koName;
+    btn.addEventListener('click', () => {
+      audio.playSleeveFlip();
+      world.enterShelfCloseup(shelf.id);
+    });
+    tabsContainer.appendChild(btn);
+  });
+
+  document.getElementById('btn-close-shelf').addEventListener('click', () => {
+    closeShelfDiggingUI(true);
+  });
+
+  document.getElementById('btn-lp-prev').addEventListener('click', () => {
+    flipShelfLP(-1);
+  });
+
+  document.getElementById('btn-lp-next').addEventListener('click', () => {
+    flipShelfLP(1);
+  });
+
+  // Mouse wheel inside the crate viewport flips records!
+  const viewport = document.getElementById('lp-crate-viewport');
+  viewport.addEventListener(
+    'wheel',
+    (e) => {
+      e.preventDefault();
+      if (e.deltaY > 0) flipShelfLP(1);
+      else if (e.deltaY < 0) flipShelfLP(-1);
+    },
+    { passive: false }
+  );
+
+  // Random Digging Button ("추천곡들을 랜덤하게 넘겨볼수있고")
+  document.getElementById('btn-random-lp').addEventListener('click', () => {
+    triggerRandomShelfFlip();
+  });
+
+  // Pick LP Button ("선택하면 들고 원하는 테이블로 가서 LP판 넣고 음악을 들을수있도록")
+  document.getElementById('btn-pick-lp').addEventListener('click', () => {
+    pickCurrentShelfLP();
+  });
+
+  const btnShelfRec = document.getElementById('btn-shelf-open-user-recommend');
+  if (btnShelfRec) {
+    btnShelfRec.addEventListener('click', () => {
+      openRecommendSongModal();
+    });
+  }
+}
+
+function openShelfDiggingUI(shelfData) {
+  state.openShelf = shelfData;
+  state.selectedLPIndex = 0;
+
+  // Hide user corner & table HUD if open
+  closeUserCornerUI(false);
+  document.getElementById('table-turntable-hud').classList.add('hidden');
+  document.getElementById('proximity-prompt').classList.add('hidden');
+
+  const overlay = document.getElementById('shelf-closeup-overlay');
+  overlay.classList.remove('hidden');
+  highlightZoneButton('shelves');
+
+  document.getElementById('shelf-modal-badge').textContent = `${shelfData.code} · FRONT CLOSE-UP VIEW`;
+  document.getElementById('shelf-modal-title').textContent = `${shelfData.name} (${shelfData.koName})`;
+  document.getElementById('shelf-modal-desc').textContent = shelfData.subtitle;
+  document.getElementById('crate-front-plate').textContent = `${shelfData.name} · POPULAR VINYL`;
+
+  // Highlight active genre tab
+  document.querySelectorAll('.shelf-tab-btn').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.shelfId === shelfData.id);
+  });
+
+  setLocationStatus(`${shelfData.koName} LP 책장 정면 디깅 중`);
+  audio.playSleeveFlip();
+  renderShelfCrateCards();
+}
+
+function closeShelfDiggingUI(tellWorld = true) {
+  state.openShelf = null;
+  document.getElementById('shelf-closeup-overlay').classList.add('hidden');
+  if (tellWorld) {
+    world.exitShelfCloseup();
+    highlightZoneButton('walk');
+    setLocationStatus(
+      state.heldLP
+        ? `LP를 들고 테이블을 찾는 중 (${state.heldLP.title})`
+        : 'LP바 라운지 산책 중'
+    );
+  }
+}
+
+function flipShelfLP(delta) {
+  if (!state.openShelf || state.isRandomFlipping) return;
+  const count = state.openShelf.records.length;
+  if (count === 0) return;
+
+  state.selectedLPIndex = (state.selectedLPIndex + delta + count) % count;
+  audio.playSleeveFlip();
+  updateShelfCratePositions();
+}
+
+function triggerRandomShelfFlip() {
+  if (!state.openShelf || state.isRandomFlipping) return;
+  const count = state.openShelf.records.length;
+  if (count <= 1) return;
+
+  state.isRandomFlipping = true;
+  const totalFlips = 6 + Math.floor(Math.random() * 5);
+  let step = 0;
+
+  const flipInterval = setInterval(() => {
+    state.selectedLPIndex = (state.selectedLPIndex + 1 + Math.floor(Math.random() * 2)) % count;
+    audio.playSleeveFlip();
+    updateShelfCratePositions();
+    step++;
+
+    if (step >= totalFlips) {
+      clearInterval(flipInterval);
+      state.isRandomFlipping = false;
+      const chosen = state.openShelf.records[state.selectedLPIndex];
+      showToast(`🎲 랜덤 추천 LP: [${chosen.title} — ${chosen.artist}]`);
+    }
+  }, 95);
+}
+
+function renderShelfCrateCards() {
+  const stage = document.getElementById('lp-cards-stage');
+  stage.innerHTML = '';
+  if (!state.openShelf) return;
+
+  state.openShelf.records.forEach((lp, idx) => {
+    const card = document.createElement('div');
+    card.className = 'lp-sleeve-card';
+    card.dataset.index = idx;
+
+    const img = document.createElement('img');
+    applyLPCoverImage(img, lp);
+    img.alt = lp.title;
+
+    const discPeek = document.createElement('div');
+    discPeek.className = 'lp-sleeve-disc-peek';
+
+    card.appendChild(discPeek);
+    card.appendChild(img);
+
+    card.addEventListener('click', () => {
+      if (state.selectedLPIndex === idx) {
+        pickCurrentShelfLP();
+      } else {
+        state.selectedLPIndex = idx;
+        audio.playSleeveFlip();
+        updateShelfCratePositions();
+      }
+    });
+
+    stage.appendChild(card);
+  });
+
+  updateShelfCratePositions();
+}
+
+function updateShelfCratePositions() {
+  if (!state.openShelf) return;
+  const records = state.openShelf.records;
+  const activeIdx = state.selectedLPIndex;
+  const cards = document.querySelectorAll('#lp-cards-stage .lp-sleeve-card');
+
+  cards.forEach((card, idx) => {
+    const diff = idx - activeIdx;
+    card.classList.toggle('is-active', diff === 0);
+
+    if (diff === 0) {
+      // Front & center pulled-up LP jacket facing the user straight on
+      card.style.transform = 'translate3d(-18px, -36px, 90px) rotateX(0deg) rotateY(-4deg) scale(1.04)';
+      card.style.opacity = '1';
+      card.style.zIndex = '20';
+      card.style.filter = 'brightness(1.04)';
+    } else if (diff < 0) {
+      // Left/front flipped sleeves
+      const absD = Math.abs(diff);
+      const x = -140 - absD * 38;
+      const y = 8 + absD * 8;
+      const z = -absD * 45;
+      card.style.transform = `translate3d(${x}px, ${y}px, ${z}px) rotateY(28deg) rotateZ(-4deg) scale(0.86)`;
+      card.style.opacity = absD > 3 ? '0' : String(Math.max(0.25, 0.85 - absD * 0.2));
+      card.style.zIndex = String(15 - absD);
+      card.style.filter = 'brightness(0.65)';
+    } else {
+      // Right/back stacked sleeves in crate
+      const x = 115 + diff * 38;
+      const y = 4 + diff * 6;
+      const z = -diff * 45;
+      card.style.transform = `translate3d(${x}px, ${y}px, ${z}px) rotateY(-26deg) rotateZ(3deg) scale(0.86)`;
+      card.style.opacity = diff > 3 ? '0' : String(Math.max(0.25, 0.85 - diff * 0.2));
+      card.style.zIndex = String(15 - diff);
+      card.style.filter = 'brightness(0.68)';
+    }
+  });
+
+  // Update right-side LP inspector details
+  const lp = records[activeIdx];
+  if (!lp) return;
+
+  document.getElementById('lp-detail-index').textContent = `${String(activeIdx + 1).padStart(2, '0')} / ${String(records.length).padStart(2, '0')}`;
+  document.getElementById('lp-detail-rpm').textContent = `${lp.rpm || 33}⅓ RPM · ANALOG STEREO`;
+  document.getElementById('lp-detail-title').textContent = lp.title;
+  document.getElementById('lp-detail-artist').textContent = `${lp.artist} · ${lp.year}`;
+  document.getElementById('lp-detail-desc').textContent = lp.desc;
+
+  const tagsEl = document.getElementById('lp-detail-tags');
+  tagsEl.innerHTML = '';
+  (lp.tags || []).forEach((t) => {
+    const span = document.createElement('span');
+    span.className = 'tag';
+    span.textContent = t;
+    tagsEl.appendChild(span);
+  });
+}
+
+function pickCurrentShelfLP() {
+  if (!state.openShelf) return;
+  const lp = state.openShelf.records[state.selectedLPIndex];
+  if (!lp) return;
+
+  audio.playSleeveFlip();
+  setHeldLP(lp);
+  closeShelfDiggingUI(true);
+  showToast(`💿 [${lp.title}] LP를 손에 들었습니다! 원하는 2인석·4인석 테이블을 클릭하거나 걸어가서 올려보세요.`);
+}
+
+// =========================================================================
+// 4-B. USER STORY LP CORNER (1st-Person Listening & Story Reading View)
+// =========================================================================
+function setupUserCornerUI() {
+  renderUserCornerMoodTabs();
+
+  // Header controls
+  document.getElementById('btn-uc-autoplay').addEventListener('click', () => {
+    state.userCornerAutoPlay = !state.userCornerAutoPlay;
+    const btn = document.getElementById('btn-uc-autoplay');
+    const label = document.getElementById('uc-autoplay-state');
+    btn.classList.toggle('active', state.userCornerAutoPlay);
+    label.textContent = state.userCornerAutoPlay ? 'ON' : 'OFF';
+    showToast(
+      state.userCornerAutoPlay
+        ? '🔊 1인칭 코너에서 사연 LP를 넘길 때 자동으로 노래를 청음합니다.'
+        : '🔇 자동 청음이 꺼졌습니다. [바로 듣기] 버튼으로 원하는 곡만 재생하세요.'
+    );
+  });
+
+  document.getElementById('btn-uc-open-recommend').addEventListener('click', () => {
+    openRecommendSongModal();
+  });
+
+  document.getElementById('btn-uc-goto-shelves').addEventListener('click', () => {
+    closeUserCornerUI(false);
+    world.enterShelfCloseup(state.shelves[0].id);
+  });
+
+  document.getElementById('btn-close-user-corner').addEventListener('click', () => {
+    closeUserCornerUI(true);
+  });
+
+  // Mood text recommendation ("♪ 기분 맞춤 사연곡 찾기" from yourmusic)
+  const moodInput = document.getElementById('uc-mood-input');
+  const btnMoodRecommend = document.getElementById('btn-uc-mood-recommend');
+  const runMoodSearch = () => {
+    const query = moodInput.value.trim();
+    if (!query) {
+      filterUserSongsByMood('all');
+      return;
+    }
+    const result = recommendUserSongsByMood(query, state.userSongs, 10);
+    state.activeMoodFilter = result.mood;
+    state.filteredUserSongs = result.songs;
+    state.selectedUserLPIndex = 0;
+    syncMoodTabButtons();
+    audio.playSleeveFlip();
+    renderUserCornerCrateCards(true);
+    showToast(`✨ '${query}' 기분에 어울리는 [${result.moodMeta.emoji} ${result.moodMeta.ko}] 사연곡을 찾았습니다!`);
+  };
+
+  btnMoodRecommend.addEventListener('click', runMoodSearch);
+  moodInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      runMoodSearch();
+    }
+  });
+
+  // Left/Right Crate Navigation
+  document.getElementById('btn-uc-prev').addEventListener('click', () => {
+    flipUserCornerLP(-1);
+  });
+  document.getElementById('btn-uc-next').addEventListener('click', () => {
+    flipUserCornerLP(1);
+  });
+
+  // Mouse wheel inside User Corner crate flips records
+  const ucViewport = document.getElementById('uc-crate-viewport');
+  ucViewport.addEventListener(
+    'wheel',
+    (e) => {
+      e.preventDefault();
+      if (e.deltaY > 0) flipUserCornerLP(1);
+      else if (e.deltaY < 0) flipUserCornerLP(-1);
+    },
+    { passive: false }
+  );
+
+  // 1st-Person Listening Controls
+  document.getElementById('btn-uc-play-toggle').addEventListener('click', () => {
+    const lp = state.filteredUserSongs[state.selectedUserLPIndex];
+    if (!lp) return;
+    if (state.userCornerPlaying && state.userCornerActiveLP?.id === lp.id) {
+      stopUserCornerPlayback();
+    } else {
+      startUserCornerPlayback(lp, true);
+    }
+  });
+
+  document.getElementById('btn-uc-needle-drop').addEventListener('click', () => {
+    const lp = state.filteredUserSongs[state.selectedUserLPIndex];
+    if (!lp) return;
+    startUserCornerPlayback(lp, true);
+    showToast(`🪡 [${lp.title}] 첫 트랙에 바늘을 다시 내려놓았습니다 (툭— 치지직...)`);
+  });
+
+  // Heart / Empathy Button (from yourmusic)
+  document.getElementById('btn-uc-heart').addEventListener('click', () => {
+    handleHeartCurrentUserSong();
+  });
+
+  // Random Flip & Pick LP to Table
+  document.getElementById('btn-uc-random').addEventListener('click', () => {
+    triggerRandomUserCornerFlip();
+  });
+
+  document.getElementById('btn-uc-pick-lp').addEventListener('click', () => {
+    pickCurrentUserCornerLP();
+  });
+}
+
+function renderUserCornerMoodTabs() {
+  const container = document.getElementById('uc-mood-tabs');
+  if (!container) return;
+  container.innerHTML = '';
+
+  const allBtn = document.createElement('button');
+  allBtn.type = 'button';
+  allBtn.className = 'uc-mood-chip active';
+  allBtn.dataset.mood = 'all';
+  allBtn.textContent = `💿 전체 사연 (${state.userSongs.length})`;
+  allBtn.addEventListener('click', () => filterUserSongsByMood('all'));
+  container.appendChild(allBtn);
+
+  MOOD_CATEGORIES.forEach((m) => {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'uc-mood-chip';
+    chip.dataset.mood = m.key;
+    chip.textContent = `${m.emoji} ${m.ko}`;
+    chip.addEventListener('click', () => filterUserSongsByMood(m.key));
+    container.appendChild(chip);
+  });
+}
+
+function syncMoodTabButtons() {
+  document.querySelectorAll('#uc-mood-tabs .uc-mood-chip').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.mood === state.activeMoodFilter);
+    if (btn.dataset.mood === 'all') {
+      btn.textContent = `💿 전체 사연 (${state.userSongs.length})`;
+    }
+  });
+}
+
+function filterUserSongsByMood(moodKey) {
+  state.activeMoodFilter = moodKey;
+  if (moodKey === 'all') {
+    state.filteredUserSongs = [...state.userSongs];
+  } else {
+    const matched = state.userSongs.filter((s) => s.mood === moodKey);
+    if (matched.length === 0) {
+      const meta = getMoodMeta(moodKey);
+      showToast(`아직 [${meta.emoji} ${meta.ko}] 무드의 사연곡이 없어 전체 사연곡을 표시합니다.`);
+      state.activeMoodFilter = 'all';
+      state.filteredUserSongs = [...state.userSongs];
+    } else {
+      state.filteredUserSongs = matched;
+    }
+  }
+  state.selectedUserLPIndex = 0;
+  syncMoodTabButtons();
+  audio.playSleeveFlip();
+  renderUserCornerCrateCards(true);
+}
+
+function openUserCornerUI(targetSongId = null) {
+  state.openUserCorner = true;
+
+  // Hide shelf or table HUD if open
+  closeShelfDiggingUI(false);
+  document.getElementById('table-turntable-hud').classList.add('hidden');
+  document.getElementById('proximity-prompt').classList.add('hidden');
+
+  if (targetSongId) {
+    state.activeMoodFilter = 'all';
+    state.filteredUserSongs = [...state.userSongs];
+    const foundIdx = state.filteredUserSongs.findIndex((s) => s.id === targetSongId);
+    state.selectedUserLPIndex = foundIdx >= 0 ? foundIdx : 0;
+  } else if (state.filteredUserSongs.length === 0) {
+    state.filteredUserSongs = [...state.userSongs];
+    state.selectedUserLPIndex = 0;
+  }
+
+  syncMoodTabButtons();
+
+  const overlay = document.getElementById('user-corner-overlay');
+  overlay.classList.remove('hidden');
+  highlightZoneButton('user-corner');
+
+  setLocationStatus('💌 찐 유저 추천 사연 LP 코너 (1인칭 감상 중)');
+  audio.playSleeveFlip();
+  renderUserCornerCrateCards(state.userCornerAutoPlay);
+}
+
+function closeUserCornerUI(tellWorld = true) {
+  if (!state.openUserCorner) return;
+  state.openUserCorner = false;
+  document.getElementById('user-corner-overlay').classList.add('hidden');
+
+  if (tellWorld) {
+    world.exitUserCornerCloseup();
+    highlightZoneButton('walk');
+    setLocationStatus(
+      state.heldLP
+        ? `사연 LP를 들고 테이블을 찾는 중 (${state.heldLP.title})`
+        : 'LP바 라운지 산책 중'
+    );
+  }
+}
+
+function flipUserCornerLP(delta) {
+  if (!state.openUserCorner || state.isRandomFlipping) return;
+  const count = state.filteredUserSongs.length;
+  if (count === 0) return;
+
+  state.selectedUserLPIndex = (state.selectedUserLPIndex + delta + count) % count;
+  audio.playSleeveFlip();
+  updateUserCornerPositions(state.userCornerAutoPlay);
+}
+
+function triggerRandomUserCornerFlip() {
+  if (!state.openUserCorner || state.isRandomFlipping) return;
+  const count = state.filteredUserSongs.length;
+  if (count <= 1) return;
+
+  state.isRandomFlipping = true;
+  const totalFlips = 5 + Math.floor(Math.random() * 5);
+  let step = 0;
+
+  const flipInterval = setInterval(() => {
+    state.selectedUserLPIndex = (state.selectedUserLPIndex + 1 + Math.floor(Math.random() * 2)) % count;
+    audio.playSleeveFlip();
+    updateUserCornerPositions(false);
+    step++;
+
+    if (step >= totalFlips) {
+      clearInterval(flipInterval);
+      state.isRandomFlipping = false;
+      const chosen = state.filteredUserSongs[state.selectedUserLPIndex];
+      updateUserCornerPositions(state.userCornerAutoPlay);
+      if (chosen) {
+        const recName = chosen.recommender?.name || '익명 디거';
+        showToast(`🎲 [${recName}]님의 추천 사연곡: ${chosen.title} — ${chosen.artist}`);
+      }
+    }
+  }, 95);
+}
+
+function renderUserCornerCrateCards(shouldAutoPlay = false) {
+  const stage = document.getElementById('uc-cards-stage');
+  if (!stage) return;
+  stage.innerHTML = '';
+
+  state.filteredUserSongs.forEach((lp, idx) => {
+    const card = document.createElement('div');
+    card.className = 'lp-sleeve-card uc-sleeve-card';
+    card.dataset.index = idx;
+
+    const img = document.createElement('img');
+    applyLPCoverImage(img, lp);
+    img.alt = lp.title;
+
+    const discPeek = document.createElement('div');
+    discPeek.className = 'lp-sleeve-disc-peek';
+
+    // Story Recommender Ribbon on the LP Jacket
+    const ribbon = document.createElement('div');
+    ribbon.className = 'uc-sleeve-ribbon';
+    const recName = lp.recommender?.name || '익명 디거';
+    const moodMeta = getMoodMeta(lp.mood);
+    ribbon.innerHTML = `<span>${moodMeta.emoji} ${recName}님의 사연</span><strong>♥ ${lp.heartCount || 1}</strong>`;
+
+    card.appendChild(discPeek);
+    card.appendChild(img);
+    card.appendChild(ribbon);
+
+    card.addEventListener('click', () => {
+      if (state.selectedUserLPIndex === idx) {
+        // Clicking the active front LP toggles playback or picks it up
+        if (!state.userCornerPlaying || state.userCornerActiveLP?.id !== lp.id) {
+          startUserCornerPlayback(lp, true);
+        } else {
+          pickCurrentUserCornerLP();
+        }
+      } else {
+        state.selectedUserLPIndex = idx;
+        audio.playSleeveFlip();
+        updateUserCornerPositions(state.userCornerAutoPlay);
+      }
+    });
+
+    stage.appendChild(card);
+  });
+
+  updateUserCornerPositions(shouldAutoPlay);
+}
+
+function updateUserCornerPositions(shouldAutoPlay = false) {
+  const records = state.filteredUserSongs;
+  if (!records || records.length === 0) return;
+
+  if (state.selectedUserLPIndex >= records.length) {
+    state.selectedUserLPIndex = 0;
+  }
+  const activeIdx = state.selectedUserLPIndex;
+  const cards = document.querySelectorAll('#uc-cards-stage .lp-sleeve-card');
+
+  cards.forEach((card, idx) => {
+    const diff = idx - activeIdx;
+    card.classList.toggle('is-active', diff === 0);
+
+    if (diff === 0) {
+      card.style.transform = 'translate3d(-16px, -34px, 92px) rotateX(0deg) rotateY(-4deg) scale(1.04)';
+      card.style.opacity = '1';
+      card.style.zIndex = '20';
+      card.style.filter = 'brightness(1.05)';
+    } else if (diff < 0) {
+      const absD = Math.abs(diff);
+      const x = -138 - absD * 36;
+      const y = 8 + absD * 8;
+      const z = -absD * 44;
+      card.style.transform = `translate3d(${x}px, ${y}px, ${z}px) rotateY(28deg) rotateZ(-4deg) scale(0.86)`;
+      card.style.opacity = absD > 3 ? '0' : String(Math.max(0.25, 0.85 - absD * 0.2));
+      card.style.zIndex = String(15 - absD);
+      card.style.filter = 'brightness(0.64)';
+    } else {
+      const x = 114 + diff * 36;
+      const y = 4 + diff * 6;
+      const z = -diff * 44;
+      card.style.transform = `translate3d(${x}px, ${y}px, ${z}px) rotateY(-26deg) rotateZ(3deg) scale(0.86)`;
+      card.style.opacity = diff > 3 ? '0' : String(Math.max(0.25, 0.85 - diff * 0.2));
+      card.style.zIndex = String(15 - diff);
+      card.style.filter = 'brightness(0.66)';
+    }
+  });
+
+  const lp = records[activeIdx];
+  if (!lp) return;
+
+  if (shouldAutoPlay) {
+    startUserCornerPlayback(lp, true);
+  } else {
+    updateUserCornerInspector(lp);
+  }
+}
+
+function updateUserCornerInspector(lp) {
+  if (!lp) return;
+  const records = state.filteredUserSongs;
+  const activeIdx = state.selectedUserLPIndex;
+  const moodMeta = getMoodMeta(lp.mood);
+
+  document.getElementById('uc-detail-index').textContent = `${String(activeIdx + 1).padStart(2, '0')} / ${String(records.length).padStart(2, '0')}`;
+
+  const moodBadge = document.getElementById('uc-detail-mood');
+  moodBadge.textContent = `${moodMeta.emoji} ${moodMeta.ko}`;
+  moodBadge.style.borderColor = moodMeta.color;
+  moodBadge.style.color = moodMeta.color;
+
+  // Heart state
+  const isLiked = !!state.heartState.likedIds[lp.id];
+  const btnHeart = document.getElementById('btn-uc-heart');
+  btnHeart.classList.toggle('liked', isLiked);
+  document.getElementById('uc-heart-icon').textContent = isLiked ? '♥' : '♡';
+  document.getElementById('uc-heart-count').textContent = String(lp.heartCount || 1);
+
+  // Song Cover + Title + Artist + Recommender
+  const coverEl = document.getElementById('uc-detail-cover');
+  applyLPCoverImage(coverEl, lp);
+
+  const isThisPlaying = state.userCornerPlaying && state.userCornerActiveLP?.id === lp.id;
+  document.getElementById('uc-song-cover-wrap').classList.toggle('spinning', isThisPlaying);
+
+  document.getElementById('uc-detail-title').textContent = lp.title;
+  document.getElementById('uc-detail-artist').textContent = `${lp.artist} · ${lp.year || 2024}`;
+
+  const rec = lp.recommender || {};
+  const recParts = [rec.name || '익명 디거', rec.age ? `${rec.age}세` : '', rec.city || ''].filter(Boolean);
+  document.getElementById('uc-detail-recommender').textContent = `💌 추천인: ${recParts.join(' · ')}`;
+
+  // 1st-Person Player Button & Live Indicator
+  const playLabel = document.getElementById('uc-play-btn-label');
+  const playBtn = document.getElementById('btn-uc-play-toggle');
+  const liveDot = document.getElementById('uc-live-dot');
+  playBtn.classList.toggle('playing', isThisPlaying);
+  liveDot.classList.toggle('active', isThisPlaying);
+
+  if (isThisPlaying) {
+    playLabel.textContent = '⏸ 1인칭 사연곡 청음 중 (일시정지)';
+  } else {
+    playLabel.textContent = '▶ 이 사연의 노래 바로 듣기 (1인칭 청음)';
+  }
+
+  // External Full Song Service Links (YouTube Music, Spotify, Melon)
+  const links = getMusicServiceLinks(lp);
+  document.getElementById('uc-link-yt').href = links.youtubeMusic;
+  document.getElementById('uc-link-spotify').href = links.spotify;
+  document.getElementById('uc-link-melon').href = links.melon;
+
+  // Story (Scene) & Lyric
+  document.getElementById('uc-story-scene').textContent = lp.scene || lp.desc || '';
+
+  const lyricBox = document.getElementById('uc-lyric-box');
+  const lyricEl = document.getElementById('uc-story-lyric');
+  if (lp.lyric && lp.lyric.trim()) {
+    lyricBox.classList.remove('hidden');
+    lyricEl.textContent = `"${lp.lyric.trim()}"`;
+  } else {
+    lyricBox.classList.add('hidden');
+  }
+}
+
+function startUserCornerPlayback(lp, withNeedleDrop = true) {
+  if (!lp) return;
+
+  // Pause any table turntable that was playing
+  state.tables.forEach((t) => {
+    if (t.isPlaying) {
+      t.isPlaying = false;
+      world.updateTableTurntableVisual(t.id);
+    }
+  });
+  state.playingTableId = null;
+
+  state.userCornerPlaying = true;
+  state.userCornerActiveLP = lp;
+
+  world.updateUserCornerVisuals(state.userSongs, lp, true);
+  audio.startTurntableLP(lp, lp.rpm || 33, withNeedleDrop);
+
+  updateUserCornerInspector(lp);
+  refreshNowPlayingBar();
+}
+
+function stopUserCornerPlayback() {
+  state.userCornerPlaying = false;
+  world.updateUserCornerVisuals(state.userSongs, state.userCornerActiveLP, false);
+  audio.stopTurntable(true);
+
+  const currentLP = state.filteredUserSongs[state.selectedUserLPIndex];
+  if (currentLP) updateUserCornerInspector(currentLP);
+  refreshNowPlayingBar();
+}
+
+function handleHeartCurrentUserSong() {
+  const lp = state.filteredUserSongs[state.selectedUserLPIndex];
+  if (!lp) return;
+
+  const alreadyLiked = !!state.heartState.likedIds[lp.id];
+  if (alreadyLiked) {
+    delete state.heartState.likedIds[lp.id];
+    lp.heartCount = Math.max(1, (lp.heartCount || 1) - 1);
+    showToast(`♡ [${lp.title}] 공감 하트를 취소했습니다.`);
+  } else {
+    state.heartState.likedIds[lp.id] = true;
+    lp.heartCount = (lp.heartCount || 1) + 1;
+    audio.playSleeveFlip();
+    showToast(`♥ [${lp.recommender?.name || '익명'}]님의 사연과 '${lp.title}'에 공감 하트를 보냈습니다!`);
+  }
+
+  state.heartState.counts[lp.id] = lp.heartCount;
+  saveHeartState(state.heartState);
+
+  // Update ribbon heart count on the active card
+  const activeCardRibbonStrong = document.querySelector(
+    `#uc-cards-stage .lp-sleeve-card[data-index="${state.selectedUserLPIndex}"] .uc-sleeve-ribbon strong`
+  );
+  if (activeCardRibbonStrong) {
+    activeCardRibbonStrong.textContent = `♥ ${lp.heartCount}`;
+  }
+
+  updateUserCornerInspector(lp);
+}
+
+function pickCurrentUserCornerLP() {
+  const lp = state.filteredUserSongs[state.selectedUserLPIndex];
+  if (!lp) return;
+
+  audio.playSleeveFlip();
+  setHeldLP(lp);
+  closeUserCornerUI(true);
+  showToast(`💿 [${lp.recommender?.name || '익명'}]님의 추천곡 '${lp.title}' LP를 들었습니다! 원하는 테이블로 가서 올려보세요.`);
+}
+
+// =========================================================================
+// 4-C. USER SONG & STORY RECOMMENDATION MODAL (Artist/Title Search + Story)
+// =========================================================================
+const recFormState = {
+  candidates: [],
+  selectedCandidate: null,
+  matched: false,
+  confirmed: false,
+  contactType: 'instagram',
+  previewingUrl: null
+};
+
+function setupRecommendSongModal() {
+  const modal = document.getElementById('recommend-song-modal');
+  const artistInput = document.getElementById('rec-artist-input');
+  const titleInput = document.getElementById('rec-title-input');
+  const btnSearch = document.getElementById('btn-rec-search');
+
+  const closeModal = () => closeRecommendSongModal();
+  document.getElementById('btn-close-recommend-modal').addEventListener('click', closeModal);
+  document.getElementById('btn-rec-cancel').addEventListener('click', closeModal);
+
+  // Trigger search by button or Enter key in artist/title inputs
+  btnSearch.addEventListener('click', () => performRecommendSongSearch());
+  [artistInput, titleInput].forEach((inp) => {
+    inp.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        performRecommendSongSearch();
+      }
+    });
+    inp.addEventListener('input', () => {
+      hideFieldError('rec-err-song');
+    });
+  });
+
+  // Confirmation card buttons (IS THIS RIGHT? YES ♥ / NO from yourmusic)
+  document.getElementById('btn-rec-confirm-preview').addEventListener('click', () => {
+    const cand = recFormState.selectedCandidate;
+    if (!cand || !cand.previewUrl) {
+      showToast('이 곡은 30초 미리듣기 음원이 없어 등록 시 아날로그 신스/YouTube로 재생됩니다.');
+      return;
+    }
+    toggleCandidateSamplePreview(cand.previewUrl, document.getElementById('btn-rec-confirm-preview'));
+  });
+
+  document.getElementById('btn-rec-confirm-yes').addEventListener('click', () => {
+    if (!recFormState.selectedCandidate) return;
+    recFormState.confirmed = true;
+    hideFieldError('rec-err-confirmed');
+
+    const box = document.getElementById('rec-confirm-box');
+    box.classList.add('is-confirmed');
+    document.getElementById('rec-confirm-status-tag').textContent = '✓ CONFIRMED ♥ · 이 노래로 나만의 사연을 남깁니다';
+    document.getElementById('btn-rec-confirm-yes').textContent = '✓ YES ♥ 선택 완료';
+    audio.playSleeveFlip();
+  });
+
+  document.getElementById('btn-rec-confirm-no').addEventListener('click', () => {
+    audio.stopQuickSample();
+    recFormState.matched = false;
+    recFormState.confirmed = false;
+    recFormState.selectedCandidate = null;
+    document.getElementById('rec-confirm-box').classList.add('hidden');
+    document.getElementById('rec-confirm-box').classList.remove('is-confirmed');
+    if (recFormState.candidates.length > 0) {
+      document.getElementById('rec-results-wrap').classList.remove('hidden');
+    }
+  });
+
+  // Contact type selector
+  document.querySelectorAll('#rec-contact-type-group .contact-type-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#rec-contact-type-group .contact-type-btn').forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      recFormState.contactType = btn.dataset.type;
+      const contactInput = document.getElementById('rec-contact-input');
+      contactInput.placeholder = CONTACT_LABELS[recFormState.contactType]?.placeholder || '@아이디';
+    });
+  });
+
+  document.getElementById('rec-scene-input').addEventListener('input', () => {
+    hideFieldError('rec-err-scene');
+  });
+
+  // Submit recommendation
+  document.getElementById('btn-rec-submit').addEventListener('click', () => {
+    submitUserSongRecommendation();
+  });
+
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) closeModal();
+  });
+}
+
+function openRecommendSongModal() {
+  audio.stopQuickSample();
+  const modal = document.getElementById('recommend-song-modal');
+  modal.classList.remove('hidden');
+
+  // Reset form errors
+  ['rec-err-song', 'rec-err-confirmed', 'rec-err-scene', 'rec-err-contact', 'rec-err-privacy'].forEach(hideFieldError);
+}
+
+function closeRecommendSongModal() {
+  audio.stopQuickSample();
+  recFormState.previewingUrl = null;
+  document.getElementById('recommend-song-modal').classList.add('hidden');
+}
+
+function showFieldError(id, msg) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = `⚠ ${msg}`;
+  el.classList.remove('hidden');
+}
+
+function hideFieldError(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = '';
+  el.classList.add('hidden');
+}
+
+async function performRecommendSongSearch() {
+  const artist = document.getElementById('rec-artist-input').value.trim();
+  const title = document.getElementById('rec-title-input').value.trim();
+  const btnSearch = document.getElementById('btn-rec-search');
+  const noteEl = document.getElementById('rec-search-note');
+
+  hideFieldError('rec-err-song');
+  hideFieldError('rec-err-confirmed');
+
+  if (!artist && !title) {
+    showFieldError('rec-err-song', '가수 이름이나 노래 제목 중 하나 이상을 입력해주세요.');
+    return;
+  }
+
+  audio.stopQuickSample();
+  btnSearch.disabled = true;
+  btnSearch.textContent = '⏳ 검색 중...';
+  noteEl.textContent = '🔍 LP바 카탈로그 및 글로벌 음원 아카이브에서 곡과 앨범 커버를 찾고 있습니다...';
+
+  try {
+    const results = await searchSongsByArtistAndTitle(artist, title, state.shelves, state.userSongs, 8);
+    recFormState.candidates = results;
+    recFormState.matched = false;
+    recFormState.confirmed = false;
+    recFormState.selectedCandidate = null;
+
+    document.getElementById('rec-confirm-box').classList.add('hidden');
+    document.getElementById('rec-confirm-box').classList.remove('is-confirmed');
+
+    renderRecommendSearchResults(results, artist, title);
+    noteEl.textContent =
+      results.length > 0
+        ? `✨ 총 ${results.length}개의 노래를 찾았습니다. 미리듣기(▶)로 확인하거나 곡을 선택해주세요.`
+        : '검색 결과가 없어도 입력한 가수·제목으로 직접 LP를 생성해 추천할 수 있습니다.';
+  } catch (err) {
+    console.warn('Search error:', err);
+    renderRecommendSearchResults([], artist, title);
+  } finally {
+    btnSearch.disabled = false;
+    btnSearch.textContent = '🔍 노래 찾기';
+  }
+}
+
+function renderRecommendSearchResults(results, rawArtist, rawTitle) {
+  const wrap = document.getElementById('rec-results-wrap');
+  const list = document.getElementById('rec-results-list');
+  const countEl = document.getElementById('rec-results-count');
+
+  wrap.classList.remove('hidden');
+  list.innerHTML = '';
+
+  if (results.length === 0) {
+    countEl.textContent = '검색 결과 0건 · 직접 입력한 곡으로 등록 가능';
+    const customRow = document.createElement('div');
+    customRow.className = 'rec-result-item custom-fallback';
+    customRow.innerHTML = `
+      <div class="rec-result-info">
+        <strong>"${rawTitle || '무제'}" — ${rawArtist || '익명 아티스트'}</strong>
+        <small>음원 DB에 없는 인디/미발매 곡도 커스텀 LP 자켓으로 바로 추천할 수 있습니다.</small>
+      </div>
+      <button type="button" class="btn-rec-pick">이 곡으로 선택</button>
+    `;
+    customRow.querySelector('.btn-rec-pick').addEventListener('click', () => {
+      selectRecommendCandidate({
+        artist: rawArtist || 'Unknown Artist',
+        title: rawTitle || 'Untitled Track',
+        album: 'Custom Vinyl Selection',
+        year: new Date().getFullYear(),
+        coverImage: '',
+        previewUrl: '',
+        youtubeId: '',
+        spotifyTrackId: ''
+      });
+    });
+    list.appendChild(customRow);
+    return;
+  }
+
+  countEl.textContent = `검색 결과 (${results.length}곡)`;
+
+  results.forEach((item) => {
+    const row = document.createElement('div');
+    row.className = 'rec-result-item';
+
+    const tempLP = normalizeUserSongToLP({
+      artist: item.artist,
+      title: item.title,
+      coverImage: item.coverImage
+    });
+
+    const img = document.createElement('img');
+    img.className = 'rec-result-thumb';
+    applyLPCoverImage(img, tempLP);
+    img.alt = item.title;
+
+    const info = document.createElement('div');
+    info.className = 'rec-result-info';
+    info.innerHTML = `
+      <strong>${item.title}</strong>
+      <span>${item.artist}</span>
+      <small>${item.album || 'Single / Album'} · ${item.year || ''}</small>
+    `;
+
+    const actions = document.createElement('div');
+    actions.className = 'rec-result-actions';
+
+    if (item.previewUrl) {
+      const btnPrev = document.createElement('button');
+      btnPrev.type = 'button';
+      btnPrev.className = 'btn-rec-sample';
+      btnPrev.textContent = '▶ 미리듣기';
+      btnPrev.addEventListener('click', (e) => {
+        e.stopPropagation();
+        toggleCandidateSamplePreview(item.previewUrl, btnPrev);
+      });
+      actions.appendChild(btnPrev);
+    }
+
+    const btnPick = document.createElement('button');
+    btnPick.type = 'button';
+    btnPick.className = 'btn-rec-pick';
+    btnPick.textContent = '선택';
+    btnPick.addEventListener('click', (e) => {
+      e.stopPropagation();
+      selectRecommendCandidate(item);
+    });
+    actions.appendChild(btnPick);
+
+    row.appendChild(img);
+    row.appendChild(info);
+    row.appendChild(actions);
+
+    row.addEventListener('click', () => selectRecommendCandidate(item));
+    list.appendChild(row);
+  });
+}
+
+function toggleCandidateSamplePreview(previewUrl, btnEl) {
+  if (!previewUrl) return;
+  if (recFormState.previewingUrl === previewUrl) {
+    audio.stopQuickSample();
+    recFormState.previewingUrl = null;
+    if (btnEl) btnEl.textContent = '▶ 미리듣기';
+    return;
+  }
+
+  // Reset all preview button labels
+  document.querySelectorAll('.btn-rec-sample, #btn-rec-confirm-preview').forEach((b) => {
+    b.textContent = b.id === 'btn-rec-confirm-preview' ? '▶ 30초 미리듣기' : '▶ 미리듣기';
+  });
+
+  recFormState.previewingUrl = previewUrl;
+  if (btnEl) btnEl.textContent = '⏹ 정지';
+
+  audio.playQuickSample(previewUrl, () => {
+    recFormState.previewingUrl = null;
+    if (btnEl) {
+      btnEl.textContent = btnEl.id === 'btn-rec-confirm-preview' ? '▶ 30초 미리듣기' : '▶ 미리듣기';
+    }
+  });
+}
+
+function selectRecommendCandidate(item) {
+  audio.stopQuickSample();
+  recFormState.previewingUrl = null;
+  recFormState.selectedCandidate = item;
+  recFormState.matched = true;
+  recFormState.confirmed = false;
+
+  // Fill inputs with canonical artist & title
+  document.getElementById('rec-artist-input').value = item.artist;
+  document.getElementById('rec-title-input').value = item.title;
+
+  hideFieldError('rec-err-song');
+  hideFieldError('rec-err-confirmed');
+
+  // Hide results list and show IS THIS RIGHT? confirmation box
+  document.getElementById('rec-results-wrap').classList.add('hidden');
+  const confirmBox = document.getElementById('rec-confirm-box');
+  confirmBox.classList.remove('hidden');
+  confirmBox.classList.remove('is-confirmed');
+
+  document.getElementById('rec-confirm-status-tag').textContent = 'IS THIS RIGHT? · 이 노래가 맞나요? (YES ♥를 눌러 확정해주세요)';
+  document.getElementById('btn-rec-confirm-yes').textContent = 'YES ♥ 맞아요';
+
+  const tempLP = normalizeUserSongToLP({
+    artist: item.artist,
+    title: item.title,
+    coverImage: item.coverImage
+  });
+  applyLPCoverImage(document.getElementById('rec-confirm-cover'), tempLP);
+
+  document.getElementById('rec-confirm-title').textContent = item.title;
+  document.getElementById('rec-confirm-artist').textContent = item.artist;
+  document.getElementById('rec-confirm-album').textContent = `${item.album || 'Album'} · ${item.year || ''}`;
+
+  const previewBtn = document.getElementById('btn-rec-confirm-preview');
+  if (item.previewUrl) {
+    previewBtn.classList.remove('hidden');
+    previewBtn.textContent = '▶ 30초 미리듣기';
+  } else {
+    previewBtn.classList.add('hidden');
+  }
+}
+
+async function submitUserSongRecommendation() {
+  ['rec-err-song', 'rec-err-confirmed', 'rec-err-scene', 'rec-err-contact', 'rec-err-privacy'].forEach(hideFieldError);
+
+  const artist = document.getElementById('rec-artist-input').value.trim();
+  const title = document.getElementById('rec-title-input').value.trim();
+  const scene = document.getElementById('rec-scene-input').value.trim();
+  const lyric = document.getElementById('rec-lyric-input').value.trim();
+  const name = document.getElementById('rec-name-input').value.trim() || '익명 디거';
+  const age = document.getElementById('rec-age-input').value.trim();
+  const city = document.getElementById('rec-city-input').value.trim() || '미드나잇 그루브';
+  const contact = document.getElementById('rec-contact-input').value.trim();
+  const privacyAgreed = document.getElementById('rec-privacy-chk').checked;
+
+  const { valid, errors } = validateSongSubmission({
+    artist,
+    title,
+    matched: recFormState.matched,
+    confirmed: recFormState.confirmed,
+    scene,
+    contactType: recFormState.contactType,
+    contact,
+    privacyAgreed
+  });
+
+  if (!valid) {
+    if (errors.song) showFieldError('rec-err-song', errors.song);
+    if (errors.confirmed) showFieldError('rec-err-confirmed', errors.confirmed);
+    if (errors.scene) showFieldError('rec-err-scene', errors.scene);
+    if (errors.contact) showFieldError('rec-err-contact', errors.contact);
+    if (errors.privacy) showFieldError('rec-err-privacy', errors.privacy);
+    return;
+  }
+
+  const btnSubmit = document.getElementById('btn-rec-submit');
+  btnSubmit.disabled = true;
+  btnSubmit.textContent = '⏳ LP 자켓 각인 및 코너 등록 중...';
+
+  try {
+    const cand = recFormState.selectedCandidate || {};
+    let coverImage = cand.coverImage || '';
+    let previewUrl = cand.previewUrl || '';
+    let spotifyTrackId = cand.spotifyTrackId || '';
+    let year = cand.year || new Date().getFullYear();
+
+    // If cover or preview wasn't populated yet, do a quick lookup
+    if (!coverImage && !previewUrl) {
+      const lookedUp = await lookupSongPreviewAndArt(artist, title);
+      coverImage = lookedUp.coverImage || '';
+      previewUrl = lookedUp.previewUrl || '';
+      spotifyTrackId = lookedUp.spotifyTrackId || '';
+      if (lookedUp.year) year = lookedUp.year;
+    }
+
+    const newSongLP = normalizeUserSongToLP(
+      {
+        id: 'user-custom-' + Date.now(),
+        artist,
+        title,
+        year,
+        scene,
+        lyric,
+        recommender: { name, age, city },
+        coverImage,
+        previewUrl,
+        youtubeId: cand.youtubeId || '',
+        spotifyTrackId,
+        heartCount: 1,
+        createdAt: new Date().toISOString().slice(0, 10)
+      },
+      0
+    );
+
+    // Save to localStorage and prepend to state
+    persistCustomUserSong(newSongLP);
+    state.userSongs.unshift(newSongLP);
+    state.activeMoodFilter = 'all';
+    state.filteredUserSongs = [...state.userSongs];
+    state.selectedUserLPIndex = 0;
+
+    // Also add a note to the Whiskey Coaster Guestbook so visitors see it there too
+    state.coasters.unshift({
+      id: 'c-' + Date.now(),
+      nickname: name,
+      table: '💌 유저 사연 LP 코너',
+      lpTitle: `${title} — ${artist}`,
+      message: scene.length > 110 ? scene.slice(0, 110) + '…' : scene,
+      time: '방금 추천됨'
+    });
+    renderCoasterNotes();
+
+    // Update 3D User LP Corner wall jackets & turntable
+    world.updateUserCornerVisuals(state.userSongs, newSongLP, true);
+
+    // Reset form fields
+    document.getElementById('rec-artist-input').value = '';
+    document.getElementById('rec-title-input').value = '';
+    document.getElementById('rec-scene-input').value = '';
+    document.getElementById('rec-lyric-input').value = '';
+    document.getElementById('rec-contact-input').value = '';
+    document.getElementById('rec-privacy-chk').checked = false;
+    document.getElementById('rec-results-wrap').classList.add('hidden');
+    document.getElementById('rec-confirm-box').classList.add('hidden');
+    recFormState.candidates = [];
+    recFormState.selectedCandidate = null;
+    recFormState.matched = false;
+    recFormState.confirmed = false;
+
+    closeRecommendSongModal();
+
+    // Immediately transition to 1st-Person User LP Corner & play the user's newly recommended song!
+    world.enterUserCornerCloseup();
+    openUserCornerUI(newSongLP.id);
+    startUserCornerPlayback(newSongLP, true);
+
+    const moodMeta = getMoodMeta(newSongLP.mood);
+    showToast(`💌 [${name}]님의 추천곡 '${title}'이(가) [${moodMeta.emoji} ${moodMeta.ko}] LP 코너에 등록되어 재생됩니다!`);
+  } finally {
+    btnSubmit.disabled = false;
+    btnSubmit.textContent = '💿 사연과 함께 유저 LP 코너에 꽂기';
+  }
+}
+
+// =========================================================================
+// 5. TABLE & 3D TURNTABLE INTERACTION (2-Person & 4-Person Tables)
+// =========================================================================
+function setupTableTurntableHUD() {
+  document.getElementById('btn-leave-table').addEventListener('click', () => {
+    closeTableTurntableHUD(true);
+  });
+
+  // Put currently held LP onto this table's turntable
+  document.getElementById('btn-tt-put-held').addEventListener('click', () => {
+    if (!state.seatedTable || !state.heldLP) return;
+    placeLPOnTableAndPlay(state.seatedTable, state.heldLP);
+  });
+
+  // Tonearm Needle Drop / Lift Toggle
+  document.getElementById('btn-tt-needle').addEventListener('click', () => {
+    if (!state.seatedTable) return;
+    const table = state.seatedTable;
+
+    // If table is empty and user has no held LP, load a random recommended LP so they can enjoy right away
+    if (!table.currentLP) {
+      if (state.heldLP) {
+        placeLPOnTableAndPlay(table, state.heldLP);
+        return;
+      } else {
+        const randomShelf = state.shelves[Math.floor(Math.random() * state.shelves.length)];
+        const randomLP = randomShelf.records[Math.floor(Math.random() * randomShelf.records.length)];
+        placeLPOnTableAndPlay(table, randomLP);
+        showToast(`💿 테이블 추천 LP [${randomLP.title}]를 턴테이블에 올렸습니다.`);
+        return;
+      }
+    }
+
+    if (table.isPlaying) {
+      stopTableTurntable(table);
+    } else {
+      startTableTurntable(table, true);
+    }
+  });
+
+  // Quick go back to front shelves to pick another LP
+  document.getElementById('btn-tt-quick-pick').addEventListener('click', () => {
+    closeTableTurntableHUD(true);
+    world.focusZone('shelves');
+    showToast('📚 앞쪽 장르별 LP 책장으로 이동했습니다. 원하는 책장을 클릭해보세요!');
+  });
+
+  // RPM Switch (33 1/3 vs 45 RPM)
+  const btn33 = document.getElementById('btn-rpm-33');
+  const btn45 = document.getElementById('btn-rpm-45');
+  btn33.addEventListener('click', () => setTableRPM(33));
+  btn45.addEventListener('click', () => setTableRPM(45));
+
+  // Crackle Slider inside Table HUD
+  const crackleSlider = document.getElementById('tt-crackle-slider');
+  crackleSlider.addEventListener('input', (e) => {
+    const val = Number(e.target.value);
+    syncCrackleLevel(val);
+  });
+
+  // Music Volume Slider inside Table HUD
+  const musicSlider = document.getElementById('tt-music-slider');
+  musicSlider.addEventListener('input', (e) => {
+    const val = Number(e.target.value);
+    syncMusicVolume(val);
+  });
+
+  // Audio Source Mode (Hybrid vs Built-in Analog Synth)
+  const btnHybrid = document.getElementById('btn-source-hybrid');
+  const btnSynth = document.getElementById('btn-source-synth');
+  btnHybrid.addEventListener('click', () => {
+    btnHybrid.classList.add('active');
+    btnSynth.classList.remove('active');
+    audio.setSourceMode('hybrid');
+  });
+  btnSynth.addEventListener('click', () => {
+    btnSynth.classList.add('active');
+    btnHybrid.classList.remove('active');
+    audio.setSourceMode('synth');
+  });
+}
+
+function handleCharacterSatAtTable(tableData) {
+  state.seatedTable = tableData;
+  closeShelfDiggingUI(false);
+  closeUserCornerUI(false);
+  document.getElementById('proximity-prompt').classList.add('hidden');
+  document.getElementById('table-turntable-hud').classList.remove('hidden');
+
+  setLocationStatus(`${tableData.name} 착석 중`);
+
+  // If the character walked to this table holding an LP in their hands,
+  // automatically load that LP onto this table's 3D turntable and drop the needle!
+  if (state.heldLP) {
+    const lpToPlay = state.heldLP;
+    placeLPOnTableAndPlay(tableData, lpToPlay);
+    showToast(`🪡 [${tableData.code}] 턴테이블에 '${lpToPlay.title}' LP를 올리고 바늘을 내려놓았습니다!`);
+  } else {
+    refreshTableHUD();
+  }
+}
+
+function placeLPOnTableAndPlay(tableData, lp) {
+  // Stop User Corner turntable if it was playing
+  if (state.userCornerPlaying) {
+    state.userCornerPlaying = false;
+    world.updateUserCornerVisuals(state.userSongs, state.userCornerActiveLP, false);
+  }
+
+  // Stop any other table that was previously playing
+  state.tables.forEach((t) => {
+    if (t.id !== tableData.id && t.isPlaying) {
+      t.isPlaying = false;
+      world.updateTableTurntableVisual(t.id);
+    }
+  });
+
+  tableData.currentLP = lp;
+  tableData.rpm = lp.rpm || 33;
+
+  // Clear held LP from character's hands since it's now on the turntable!
+  if (state.heldLP && state.heldLP.id === lp.id) {
+    setHeldLP(null);
+  }
+
+  startTableTurntable(tableData, true);
+}
+
+function startTableTurntable(tableData, withNeedleDrop = true) {
+  if (!tableData.currentLP) return;
+
+  // Stop User Corner turntable if it was playing
+  if (state.userCornerPlaying) {
+    state.userCornerPlaying = false;
+    world.updateUserCornerVisuals(state.userSongs, state.userCornerActiveLP, false);
+  }
+
+  // Pause other tables
+  state.tables.forEach((t) => {
+    if (t.id !== tableData.id && t.isPlaying) {
+      t.isPlaying = false;
+      world.updateTableTurntableVisual(t.id);
+    }
+  });
+
+  tableData.isPlaying = true;
+  state.playingTableId = tableData.id;
+
+  world.updateTableTurntableVisual(tableData.id);
+  audio.startTurntableLP(tableData.currentLP, tableData.rpm, withNeedleDrop);
+
+  refreshTableHUD();
+  refreshNowPlayingBar();
+}
+
+function stopTableTurntable(tableData) {
+  tableData.isPlaying = false;
+  world.updateTableTurntableVisual(tableData.id);
+  audio.stopTurntable(true);
+  refreshTableHUD();
+  refreshNowPlayingBar();
+}
+
+function setTableRPM(rpm) {
+  if (state.seatedTable) {
+    state.seatedTable.rpm = rpm;
+  }
+  audio.setRPM(rpm);
+  document.getElementById('btn-rpm-33').classList.toggle('active', rpm === 33);
+  document.getElementById('btn-rpm-45').classList.toggle('active', rpm === 45);
+}
+
+function refreshTableHUD() {
+  const table = state.seatedTable;
+  if (!table) return;
+
+  document.getElementById('tt-table-badge').textContent = table.typeLabel;
+  document.getElementById('tt-table-name').textContent = table.name;
+
+  const btnPutHeld = document.getElementById('btn-tt-put-held');
+  if (state.heldLP) {
+    btnPutHeld.classList.remove('hidden');
+    btnPutHeld.querySelector('span').textContent = `💿 들고 있는 [${state.heldLP.title}] 올리기`;
+  } else {
+    btnPutHeld.classList.add('hidden');
+  }
+
+  const platterEl = document.getElementById('tt-mini-platter');
+  const coverImg = document.getElementById('tt-current-cover');
+  const emptyDisc = document.getElementById('tt-empty-disc');
+  const stateLabel = document.getElementById('tt-state-label');
+  const titleEl = document.getElementById('tt-track-title');
+  const artistEl = document.getElementById('tt-track-artist');
+  const needleLabel = document.getElementById('tt-needle-label');
+  const storyBox = document.getElementById('tt-user-story-box');
+
+  if (table.currentLP) {
+    applyLPCoverImage(coverImg, table.currentLP);
+    coverImg.classList.remove('hidden');
+    emptyDisc.classList.add('hidden');
+    platterEl.classList.toggle('spinning', table.isPlaying);
+
+    stateLabel.textContent = table.isPlaying
+      ? `🎵 턴테이블 회전 중 (${table.rpm} RPM · 치지직 ON)`
+      : '⏸ 턴테이블에 LP 올려짐 (대기 중)';
+    titleEl.textContent = table.currentLP.title;
+    artistEl.textContent = `${table.currentLP.artist} · ${table.currentLP.year}`;
+    needleLabel.textContent = table.isPlaying
+      ? '🪡 톤암(바늘) 들어올리기 · 일시정지'
+      : '🪡 톤암(바늘) 내려놓기 · 재생';
+
+    // Show user story box if this LP came from the User Story LP Corner
+    if (table.currentLP.isUserRecommendation || table.currentLP.scene) {
+      storyBox.classList.remove('hidden');
+      const rec = table.currentLP.recommender || {};
+      const recInfo = [rec.name || '익명 디거', rec.age ? `${rec.age}세` : '', rec.city || ''].filter(Boolean).join(' · ');
+      document.getElementById('tt-user-story-recommender').textContent = `추천인: ${recInfo}`;
+      document.getElementById('tt-user-story-scene').textContent = table.currentLP.scene || table.currentLP.desc || '';
+      const lyricEl = document.getElementById('tt-user-story-lyric');
+      if (table.currentLP.lyric) {
+        lyricEl.classList.remove('hidden');
+        lyricEl.textContent = `"${table.currentLP.lyric}"`;
+      } else {
+        lyricEl.classList.add('hidden');
+      }
+    } else {
+      storyBox.classList.add('hidden');
+    }
+  } else {
+    coverImg.classList.add('hidden');
+    emptyDisc.classList.remove('hidden');
+    platterEl.classList.remove('spinning');
+    storyBox.classList.add('hidden');
+
+    stateLabel.textContent = '턴테이블 비어 있음';
+    titleEl.textContent = '올려진 LP판이 없습니다';
+    artistEl.textContent = '앞쪽 책장이나 유저 사연 LP 코너에서 LP를 골라오거나 바늘 버튼을 눌러보세요';
+    needleLabel.textContent = '💿 테이블 추천 LP 올리고 바로 재생';
+  }
+
+  document.getElementById('btn-rpm-33').classList.toggle('active', table.rpm !== 45);
+  document.getElementById('btn-rpm-45').classList.toggle('active', table.rpm === 45);
+}
+
+function closeTableTurntableHUD(tellWorld = true) {
+  state.seatedTable = null;
+  document.getElementById('table-turntable-hud').classList.add('hidden');
+  if (tellWorld) {
+    world.leaveTable();
+    highlightZoneButton('walk');
+    setLocationStatus('LP바 라운지 산책 중');
+  }
+}
+
+// =========================================================================
+// 6. PERSISTENT BOTTOM NOW-PLAYING BAR
+// =========================================================================
+function setupNowPlayingBar() {
+  document.getElementById('btn-np-toggle').addEventListener('click', () => {
+    const activeTable = state.tables.find((t) => t.id === state.playingTableId);
+    if (activeTable && activeTable.currentLP) {
+      if (activeTable.isPlaying) {
+        stopTableTurntable(activeTable);
+      } else {
+        startTableTurntable(activeTable, true);
+      }
+      return;
+    }
+
+    if (state.userCornerActiveLP) {
+      if (state.userCornerPlaying) {
+        stopUserCornerPlayback();
+      } else {
+        startUserCornerPlayback(state.userCornerActiveLP, true);
+      }
+    }
+  });
+
+  document.getElementById('btn-np-needle-drop').addEventListener('click', () => {
+    const activeTable = state.tables.find((t) => t.id === state.playingTableId);
+    if (activeTable && activeTable.currentLP) {
+      startTableTurntable(activeTable, true);
+      showToast('🪡 바늘을 LP 첫 트랙에 다시 내려놓았습니다 (툭— 치지직...)');
+      return;
+    }
+    if (state.userCornerActiveLP) {
+      startUserCornerPlayback(state.userCornerActiveLP, true);
+      showToast('🪡 바늘을 사연 LP 첫 트랙에 다시 내려놓았습니다 (툭— 치지직...)');
+    }
+  });
+
+  document.getElementById('btn-np-goto-table').addEventListener('click', () => {
+    if (state.playingTableId) {
+      closeShelfDiggingUI(false);
+      closeUserCornerUI(false);
+      world.sitAtTable(state.playingTableId);
+    } else if (state.userCornerActiveLP) {
+      closeShelfDiggingUI(false);
+      closeTableTurntableHUD(false);
+      world.enterUserCornerCloseup();
+      openUserCornerUI(state.userCornerActiveLP.id);
+    }
+  });
+
+  document.getElementById('np-crackle-range').addEventListener('input', (e) => {
+    syncCrackleLevel(Number(e.target.value));
+  });
+
+  document.getElementById('np-volume-range').addEventListener('input', (e) => {
+    syncMusicVolume(Number(e.target.value));
+  });
+}
+
+function refreshNowPlayingBar() {
+  const bar = document.getElementById('now-playing-bar');
+  const topIcon = document.getElementById('top-vinyl-icon');
+  const activeTable = state.tables.find((t) => t.id === state.playingTableId);
+
+  if (activeTable && activeTable.currentLP) {
+    bar.classList.remove('hidden');
+    topIcon.classList.toggle('playing', activeTable.isPlaying);
+
+    const disc = document.getElementById('np-spinning-disc');
+    disc.classList.toggle('paused', !activeTable.isPlaying);
+
+    applyLPCoverImage(document.getElementById('np-cover-img'), activeTable.currentLP);
+    document.getElementById('np-table-tag').textContent = `${activeTable.capacity}인석 ${activeTable.code} 턴테이블`;
+    document.getElementById('np-title').textContent = activeTable.currentLP.title;
+    document.getElementById('np-artist').textContent = activeTable.currentLP.artist;
+    document.getElementById('btn-np-toggle').textContent = activeTable.isPlaying ? '⏸ 일시정지' : '▶ 다시 재생';
+    document.getElementById('btn-np-goto-table').textContent = '🪑 해당 테이블 보기';
+    return;
+  }
+
+  if (state.userCornerActiveLP) {
+    bar.classList.remove('hidden');
+    topIcon.classList.toggle('playing', state.userCornerPlaying);
+
+    const disc = document.getElementById('np-spinning-disc');
+    disc.classList.toggle('paused', !state.userCornerPlaying);
+
+    applyLPCoverImage(document.getElementById('np-cover-img'), state.userCornerActiveLP);
+    const recName = state.userCornerActiveLP.recommender?.name || '익명 디거';
+    document.getElementById('np-table-tag').textContent = `💌 유저 사연 코너 · ${recName}님의 추천 LP`;
+    document.getElementById('np-title').textContent = state.userCornerActiveLP.title;
+    document.getElementById('np-artist').textContent = state.userCornerActiveLP.artist;
+    document.getElementById('btn-np-toggle').textContent = state.userCornerPlaying ? '⏸ 일시정지' : '▶ 다시 재생';
+    document.getElementById('btn-np-goto-table').textContent = '💌 1인칭 사연 코너 보기';
+    return;
+  }
+
+  bar.classList.add('hidden');
+  topIcon.classList.remove('playing');
+}
+
+function syncCrackleLevel(percent) {
+  audio.setAmbientVolume('crackle', percent / 100);
+  document.getElementById('tt-crackle-val').textContent = `${percent}%`;
+  document.getElementById('tt-crackle-slider').value = percent;
+  document.getElementById('np-crackle-range').value = percent;
+  document.getElementById('amb-val-crackle').textContent = `${percent}%`;
+  const ambCrackle = document.querySelector('.amb-slider[data-channel="crackle"]');
+  if (ambCrackle) ambCrackle.value = percent;
+}
+
+function syncMusicVolume(percent) {
+  audio.setMusicVolume(percent / 100);
+  document.getElementById('tt-music-val').textContent = `${percent}%`;
+  document.getElementById('tt-music-slider').value = percent;
+  document.getElementById('np-volume-range').value = percent;
+}
+
+// =========================================================================
+// 7. AMBIENT SOUND MIXER DRAWER (Moodist Style)
+// =========================================================================
+function setupAmbientDrawer() {
+  const drawer = document.getElementById('ambient-drawer');
+  const coasterDrawer = document.getElementById('coaster-drawer');
+
+  document.getElementById('btn-toggle-ambient').addEventListener('click', () => {
+    coasterDrawer.classList.add('hidden');
+    drawer.classList.toggle('hidden');
+  });
+
+  document.getElementById('btn-close-ambient').addEventListener('click', () => {
+    drawer.classList.add('hidden');
+  });
+
+  const btnNextBgJazz = document.getElementById('btn-next-bg-jazz');
+  if (btnNextBgJazz) {
+    btnNextBgJazz.addEventListener('click', () => {
+      const next = audio.nextBackgroundJazzTrack();
+      if (next) {
+        showToast(`🎷 잔잔한 재즈 배경음 전환: [${next.title} — ${next.artist}]`);
+      }
+    });
+  }
+
+  document.querySelectorAll('.amb-slider').forEach((slider) => {
+    slider.addEventListener('input', (e) => {
+      const ch = e.target.dataset.channel;
+      const val = Number(e.target.value);
+      if (ch === 'crackle') {
+        syncCrackleLevel(val);
+      } else {
+        audio.setAmbientVolume(ch, val / 100);
+        const label = document.getElementById(`amb-val-${ch}`);
+        if (label) label.textContent = `${val}%`;
+      }
+    });
+  });
+
+  // Moodist Presets (Default cozy: ONLY calm jazz BGM in background; crackle ONLY when playing a song)
+  const presets = {
+    cozy: { bgJazz: 48, crackle: 65, rain: 0, murmur: 0, ice: 0, fire: 0 },
+    rainy: { bgJazz: 45, crackle: 65, rain: 40, murmur: 0, ice: 0, fire: 0 },
+    'pure-vinyl': { bgJazz: 40, crackle: 85, rain: 0, murmur: 0, ice: 0, fire: 0 }
+  };
+
+  document.querySelectorAll('.preset-chip[data-preset]').forEach((chip) => {
+    chip.addEventListener('click', () => {
+      const p = presets[chip.dataset.preset];
+      if (!p) return;
+      Object.entries(p).forEach(([ch, val]) => {
+        if (ch === 'crackle') {
+          syncCrackleLevel(val);
+        } else {
+          audio.setAmbientVolume(ch, val / 100);
+          const s = document.querySelector(`.amb-slider[data-channel="${ch}"]`);
+          if (s) s.value = val;
+          const l = document.getElementById(`amb-val-${ch}`);
+          if (l) l.textContent = `${val}%`;
+        }
+      });
+      showToast(`🎚️ 사운드 프리셋 [${chip.textContent}] 적용 완료`);
+    });
+  });
+}
+
+// =========================================================================
+// 8. WHISKEY COASTER GUESTBOOK
+// =========================================================================
+function setupCoasterGuestbook() {
+  const drawer = document.getElementById('coaster-drawer');
+  const ambientDrawer = document.getElementById('ambient-drawer');
+
+  document.getElementById('btn-toggle-coaster').addEventListener('click', () => {
+    ambientDrawer.classList.add('hidden');
+    drawer.classList.toggle('hidden');
+    renderCoasterNotes();
+  });
+
+  document.getElementById('btn-close-coaster').addEventListener('click', () => {
+    drawer.classList.add('hidden');
+  });
+
+  document.getElementById('coaster-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const nick = document.getElementById('coaster-nickname').value.trim();
+    const table = document.getElementById('coaster-table-select').value;
+    const msg = document.getElementById('coaster-message').value.trim();
+    if (!nick || !msg) return;
+
+    const activeTable = state.tables.find((t) => t.id === state.playingTableId);
+    const currentLP = state.heldLP || activeTable?.currentLP || state.userCornerActiveLP;
+    const lpTitle = currentLP
+      ? `${currentLP.title} — ${currentLP.artist}`
+      : 'Midnight Groove House Vinyl';
+
+    state.coasters.unshift({
+      id: 'c-' + Date.now(),
+      nickname: nick,
+      table,
+      lpTitle,
+      message: msg,
+      time: '방금 전'
+    });
+
+    document.getElementById('coaster-message').value = '';
+    renderCoasterNotes();
+    showToast('🥃 위스키 코스터에 오늘 밤의 사연과 추천곡을 남겼습니다!');
+  });
+
+  renderCoasterNotes();
+}
+
+function renderCoasterNotes() {
+  const list = document.getElementById('coaster-list');
+  list.innerHTML = '';
+  state.coasters.forEach((c) => {
+    const card = document.createElement('div');
+    card.className = 'coaster-card';
+    card.innerHTML = `
+      <div class="coaster-card-top">
+        <strong>🥃 ${c.nickname} · ${c.table}</strong>
+        <span>${c.time}</span>
+      </div>
+      <div class="coaster-card-lp">💿 ${c.lpTitle}</div>
+      <p>${c.message}</p>
+    `;
+    list.appendChild(card);
+  });
+}
+
+// =========================================================================
+// 9. CUSTOM YOUTUBE LP MODAL
+// =========================================================================
+function setupCustomLPModal() {
+  const modal = document.getElementById('custom-lp-modal');
+
+  document.getElementById('btn-open-custom-lp').addEventListener('click', () => {
+    modal.classList.remove('hidden');
+  });
+
+  const closeModal = () => modal.classList.add('hidden');
+  document.getElementById('btn-close-custom-lp').addEventListener('click', closeModal);
+  document.getElementById('btn-cancel-custom-lp').addEventListener('click', closeModal);
+
+  document.getElementById('custom-lp-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const title = document.getElementById('custom-lp-title').value.trim();
+    const artist = document.getElementById('custom-lp-artist').value.trim();
+    const rawYt = document.getElementById('custom-lp-yt').value.trim();
+    const desc = document.getElementById('custom-lp-desc').value.trim() || '직접 책장에 꽂아둔 나만의 추천 LP 음반입니다.';
+
+    if (!title || !artist || !state.openShelf) return;
+
+    // Extract 11-char YouTube Video ID if full URL was pasted
+    let youtubeId = '';
+    if (rawYt) {
+      const match = rawYt.match(/(?:v=|youtu\.be\/|embed\/)([A-Za-z0-9_-]{11})/);
+      youtubeId = match ? match[1] : rawYt.slice(0, 11);
+    }
+
+    const newLP = {
+      id: 'custom-' + Date.now(),
+      title,
+      artist,
+      year: new Date().getFullYear(),
+      rpm: 33,
+      tags: ['Custom Vinyl', state.openShelf.koName],
+      youtubeId,
+      palette: ['#241932', state.openShelf.accent, '#f5ebe0'],
+      motif: 'neon-sunset',
+      synth: { style: 'lofi-chill', bpm: 86, root: 62, prog: [[0, 4, 7, 11], [5, 9, 12, 16], [2, 5, 9, 12], [7, 11, 14, 17]] },
+      desc
+    };
+
+    state.openShelf.records.unshift(newLP);
+    state.selectedLPIndex = 0;
+    closeModal();
+    e.target.reset();
+    renderShelfCrateCards();
+    showToast(`💿 [${title}] LP가 ${state.openShelf.koName} 책장에 추가되었습니다!`);
+  });
+}
+
+// =========================================================================
+// 10. GLOBAL KEYBOARD SHORTCUTS (Shelf, 1st-Person User Corner & World)
+// =========================================================================
+function setupGlobalHotkeys() {
+  window.addEventListener('keydown', (e) => {
+    if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName)) return;
+
+    // If Recommend Song Modal is open, Escape closes it
+    const recModal = document.getElementById('recommend-song-modal');
+    if (recModal && !recModal.classList.contains('hidden')) {
+      if (e.code === 'Escape') {
+        e.preventDefault();
+        closeRecommendSongModal();
+      }
+      return;
+    }
+
+    // A) When inside 1st-Person User Story LP Corner View:
+    if (state.openUserCorner) {
+      if (e.code === 'ArrowLeft' || e.code === 'KeyA') {
+        e.preventDefault();
+        flipUserCornerLP(-1);
+      } else if (e.code === 'ArrowRight' || e.code === 'KeyD') {
+        e.preventDefault();
+        flipUserCornerLP(1);
+      } else if (e.code === 'Space') {
+        e.preventDefault();
+        triggerRandomUserCornerFlip();
+      } else if (e.code === 'Enter' || e.code === 'KeyE') {
+        e.preventDefault();
+        pickCurrentUserCornerLP();
+      } else if (e.code === 'Escape') {
+        e.preventDefault();
+        closeUserCornerUI(true);
+      }
+      return;
+    }
+
+    // B) When inside Shelf Close-Up View:
+    if (state.openShelf) {
+      if (e.code === 'ArrowLeft' || e.code === 'KeyA') {
+        e.preventDefault();
+        flipShelfLP(-1);
+      } else if (e.code === 'ArrowRight' || e.code === 'KeyD') {
+        e.preventDefault();
+        flipShelfLP(1);
+      } else if (e.code === 'Space') {
+        e.preventDefault();
+        triggerRandomShelfFlip();
+      } else if (e.code === 'Enter' || e.code === 'KeyE') {
+        e.preventDefault();
+        pickCurrentShelfLP();
+      } else if (e.code === 'Escape') {
+        e.preventDefault();
+        closeShelfDiggingUI(true);
+      }
+      return;
+    }
+
+    // C) When Seated at a Table:
+    if (state.seatedTable) {
+      if (e.code === 'Escape') {
+        e.preventDefault();
+        closeTableTurntableHUD(true);
+      } else if (e.code === 'Space') {
+        e.preventDefault();
+        document.getElementById('btn-tt-needle').click();
+      }
+      return;
+    }
+
+    // D) When Walking in the 3D Bar: E or Space interacts with nearest Shelf, User Corner, or Table
+    if (e.code === 'KeyE' || e.code === 'Space') {
+      const near = world.nearestInteractable;
+      if (near) {
+        e.preventDefault();
+        if (near.type === 'user-corner') {
+          world.enterUserCornerCloseup();
+        } else if (near.type === 'shelf') {
+          world.enterShelfCloseup(near.id);
+        } else if (near.type === 'table') {
+          world.sitAtTable(near.id);
+        }
+      }
+    }
+  });
+}
