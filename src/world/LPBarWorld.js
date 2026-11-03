@@ -46,7 +46,7 @@ export class LPBarWorld {
     this.cameraTargetLook = new THREE.Vector3(0, 1.4, -2);
 
     // Character state
-    this.charPos = new THREE.Vector3(0, 0, -5.5); // Start near the front shelves & 2p tables
+    this.charPos = new THREE.Vector3((Math.random() - 0.5) * 3.2, 0, -5.5 + (Math.random() - 0.5) * 0.8); // Slight random spawn offset for multiplayer
     this.charRotY = 0; // Start facing toward camera (+Z) so the cute face & hairstyle are immediately visible
     this.walkTarget = null;
     this.walkTargetCallback = null;
@@ -54,7 +54,14 @@ export class LPBarWorld {
     this.stepTimer = 0;
     this.isSeated = false;
     this.seatedTableId = null;
+    this.seatedChairIndex = 0;
     this.heldLP = null;
+    this.localNickname = '익명의 디거';
+    this.localChatText = '';
+    this.localChatExpiresAt = 0;
+
+    // Multiplayer remote peers registry: peerId -> { group, rig, gender, labelSprite, currentPos, targetPos, currentRotY, targetRotY, isMoving, isSeated, seatedTableId, seatIndex, heldLPId, nickname, chatText, chatExpiresAt }
+    this.remotePlayers = new Map();
 
     // Auto shelf close-up state
     this.autoShelfCloseup = true;
@@ -163,7 +170,13 @@ export class LPBarWorld {
   }
 
   cycleMood() {
-    this.moodIndex = (this.moodIndex + 1) % this.moodPresets.length;
+    const nextIdx = (this.moodIndex + 1) % this.moodPresets.length;
+    return this.setMoodByIndex(nextIdx);
+  }
+
+  setMoodByIndex(idx) {
+    const safeIdx = ((idx % this.moodPresets.length) + this.moodPresets.length) % this.moodPresets.length;
+    this.moodIndex = safeIdx;
     const m = this.moodPresets[this.moodIndex];
     this.scene.background.setHex(m.bg);
     this.scene.fog.color.setHex(m.bg);
@@ -1263,7 +1276,7 @@ export class LPBarWorld {
   }
 
   // =========================================================================
-  // 5. 3D CUTE CHARACTER (Single selected Boy or Girl with `캐릭터샘플.png` proportions)
+  // 5. 3D CUTE CHARACTER & MULTIPLAYER REMOTE PEERS
   // =========================================================================
   _buildCharacter() {
     this.playerGender = 'male'; // 'male' | 'female'
@@ -1281,9 +1294,286 @@ export class LPBarWorld {
     charGlow.position.set(0, 2.3, 0.4);
     this.charGroup.add(charGlow);
 
+    // Floating 3D nameplate + speech bubble sprite above local character
+    this.localHeadSprite = this._createPlayerHeadSprite(this.localNickname, true);
+    this.localHeadSprite.position.set(0, 2.28, 0);
+    this.charGroup.add(this.localHeadSprite);
+
     this.scene.add(this.charGroup);
 
     this._attachRigsByGender();
+  }
+
+  _createPlayerHeadSprite(nickname, isLocal = false) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 512;
+    canvas.height = 176;
+    const ctx = canvas.getContext('2d');
+
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const mat = new THREE.SpriteMaterial({
+      map: tex,
+      transparent: true,
+      depthTest: false
+    });
+    const sprite = new THREE.Sprite(mat);
+    sprite.scale.set(2.35, 0.81, 1);
+    sprite.renderOrder = 25;
+    sprite.userData = { canvas, ctx, tex, isLocal };
+
+    this._drawPlayerHeadCanvas(sprite, nickname, '');
+    return sprite;
+  }
+
+  _drawPlayerHeadCanvas(sprite, nickname, chatText = '') {
+    if (!sprite || !sprite.userData) return;
+    const { canvas, ctx, tex, isLocal } = sprite.userData;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    const safeName = (nickname || '익명의 디거').slice(0, 18);
+    const safeChat = (chatText || '').trim().slice(0, 56);
+
+    // 1) Draw speech bubble at top if chatText is active
+    if (safeChat) {
+      ctx.font = '600 22px "Noto Sans KR", sans-serif';
+      const maxBubbleW = 480;
+      const textMetrics = ctx.measureText(safeChat);
+      const bubbleW = Math.min(maxBubbleW, Math.max(150, textMetrics.width + 44));
+      const bubbleH = 68;
+      const bx = (canvas.width - bubbleW) / 2;
+      const by = 8;
+
+      ctx.fillStyle = 'rgba(255, 250, 240, 0.96)';
+      ctx.strokeStyle = isLocal ? '#f59e0b' : '#a78bfa';
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.roundRect(bx, by, bubbleW, bubbleH, 18);
+      ctx.fill();
+      ctx.stroke();
+
+      // Little speech bubble tail
+      ctx.beginPath();
+      ctx.moveTo(canvas.width / 2 - 10, by + bubbleH);
+      ctx.lineTo(canvas.width / 2 + 10, by + bubbleH);
+      ctx.lineTo(canvas.width / 2, by + bubbleH + 12);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.fillStyle = '#1c120c';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      const displayChat = safeChat.length > 23 ? safeChat.slice(0, 22) + '…' : safeChat;
+      ctx.fillText(`💬 ${displayChat}`, canvas.width / 2, by + bubbleH / 2 + 1);
+    }
+
+    // 2) Draw Nameplate pill near bottom
+    ctx.font = '700 22px "Noto Sans KR", sans-serif';
+    const labelText = isLocal ? `★ ${safeName} (나)` : `🟢 ${safeName}`;
+    const nameW = Math.min(440, Math.max(140, ctx.measureText(labelText).width + 38));
+    const nameH = 44;
+    const nx = (canvas.width - nameW) / 2;
+    const ny = 114;
+
+    ctx.fillStyle = isLocal ? 'rgba(34, 21, 12, 0.88)' : 'rgba(18, 22, 34, 0.88)';
+    ctx.strokeStyle = isLocal ? 'rgba(255, 190, 92, 0.85)' : 'rgba(124, 212, 184, 0.8)';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.roundRect(nx, ny, nameW, nameH, 22);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle = isLocal ? '#ffd68a' : '#e6f4f1';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(labelText, canvas.width / 2, ny + nameH / 2 + 1);
+
+    tex.needsUpdate = true;
+  }
+
+  updateLocalPlayerLabel(nickname, chatText = null) {
+    if (nickname) {
+      this.localNickname = nickname;
+    }
+    if (chatText !== null) {
+      this.localChatText = chatText;
+      this.localChatExpiresAt = chatText ? performance.now() + 6800 : 0;
+    }
+    this._drawPlayerHeadCanvas(this.localHeadSprite, this.localNickname, this.localChatText);
+  }
+
+  _notifyLocalTransformChange(forceImmediate = false, isMoving = false) {
+    if (!this.callbacks.onPlayerTransformChange) return;
+    this.callbacks.onPlayerTransformChange(
+      {
+        x: this.charPos.x,
+        z: this.charPos.z,
+        rotY: this.charRotY,
+        isMoving: Boolean(isMoving),
+        isSeated: Boolean(this.isSeated),
+        seatedTableId: this.seatedTableId || null,
+        seatIndex: this.seatedChairIndex || 0,
+        heldLP: this.heldLP
+      },
+      forceImmediate
+    );
+  }
+
+  updateRemotePeer(peerData) {
+    if (!peerData || !peerData.id) return;
+    let entry = this.remotePlayers.get(peerData.id);
+
+    if (!entry) {
+      const group = new THREE.Group();
+      const gender = peerData.gender === 'female' ? 'female' : 'male';
+      const rig = createCuteMascotCharacter(gender);
+      group.add(rig.root);
+
+      const labelSprite = this._createPlayerHeadSprite(peerData.nickname || '익명의 디거', false);
+      labelSprite.position.set(0, 2.28, 0);
+      group.add(labelSprite);
+
+      // Subtle rim glow for remote peer visibility
+      const peerLight = new THREE.PointLight(0x9be3d6, 0.4, 3.6);
+      peerLight.position.set(0, 2.0, 0.3);
+      group.add(peerLight);
+
+      const startX = Number.isFinite(peerData.x) ? peerData.x : 0;
+      const startZ = Number.isFinite(peerData.z) ? peerData.z : -5.5;
+      group.position.set(startX, 0, startZ);
+      group.rotation.y = Number.isFinite(peerData.rotY) ? peerData.rotY : 0;
+
+      this.scene.add(group);
+
+      entry = {
+        id: peerData.id,
+        group,
+        rig,
+        gender,
+        labelSprite,
+        currentPos: new THREE.Vector3(startX, 0, startZ),
+        targetPos: new THREE.Vector3(startX, 0, startZ),
+        currentRotY: Number.isFinite(peerData.rotY) ? peerData.rotY : 0,
+        targetRotY: Number.isFinite(peerData.rotY) ? peerData.rotY : 0,
+        isMoving: false,
+        isSeated: false,
+        seatedTableId: null,
+        seatIndex: 0,
+        heldLPId: null,
+        nickname: peerData.nickname || '익명의 디거',
+        chatText: '',
+        chatExpiresAt: 0
+      };
+      this.remotePlayers.set(peerData.id, entry);
+    }
+
+    // Handle gender switch if remote user changed character
+    const nextGender = peerData.gender === 'female' ? 'female' : 'male';
+    if (entry.gender !== nextGender) {
+      entry.group.remove(entry.rig.root);
+      entry.rig = createCuteMascotCharacter(nextGender);
+      entry.group.add(entry.rig.root);
+      entry.gender = nextGender;
+      entry.heldLPId = null;
+    }
+
+    // Handle seated position vs free walking position
+    entry.isSeated = Boolean(peerData.isSeated);
+    entry.seatedTableId = peerData.seatedTableId || null;
+    entry.seatIndex = Number.isFinite(peerData.seatIndex) ? peerData.seatIndex : 0;
+
+    if (entry.isSeated && entry.seatedTableId && this.tableMeshes.has(entry.seatedTableId)) {
+      const tEntry = this.tableMeshes.get(entry.seatedTableId);
+      const seats = tEntry.chairWorldSeats || [];
+      const seat = seats[entry.seatIndex % Math.max(1, seats.length)] || seats[0];
+      if (seat) {
+        entry.targetPos.copy(seat.pos);
+        entry.targetRotY = seat.rotY;
+        entry.isMoving = false;
+      }
+    } else {
+      if (Number.isFinite(peerData.x) && Number.isFinite(peerData.z)) {
+        entry.targetPos.set(peerData.x, 0, peerData.z);
+      }
+      if (Number.isFinite(peerData.rotY)) {
+        entry.targetRotY = peerData.rotY;
+      }
+      entry.isMoving = Boolean(peerData.isMoving);
+    }
+
+    // Update held LP sleeve visual on remote character
+    const nextHeldId = peerData.heldLP?.id || null;
+    if (entry.heldLPId !== nextHeldId) {
+      entry.heldLPId = nextHeldId;
+      if (peerData.heldLP) {
+        const tex = this._getCoverTexture(peerData.heldLP);
+        entry.rig.heldLPMat.map = tex;
+        entry.rig.heldLPMat.needsUpdate = true;
+        entry.rig.heldLPMesh.visible = true;
+      } else {
+        entry.rig.heldLPMesh.visible = false;
+      }
+    }
+
+    // Update nickname & 3D speech bubble if changed
+    const nextNick = peerData.nickname || '익명의 디거';
+    const now = performance.now();
+    const activeChat = peerData.chatExpiresAt && peerData.chatExpiresAt > now ? peerData.chatText || '' : '';
+    if (entry.nickname !== nextNick || entry.chatText !== activeChat) {
+      entry.nickname = nextNick;
+      entry.chatText = activeChat;
+      entry.chatExpiresAt = peerData.chatExpiresAt || 0;
+      this._drawPlayerHeadCanvas(entry.labelSprite, entry.nickname, entry.chatText);
+    }
+  }
+
+  removeRemotePeer(peerId) {
+    const entry = this.remotePlayers.get(peerId);
+    if (!entry) return;
+    this.scene.remove(entry.group);
+    this.remotePlayers.delete(peerId);
+  }
+
+  _updateRemotePlayers(dt, elapsed) {
+    const now = performance.now();
+
+    // Expire local speech bubble if needed
+    if (this.localChatText && now > this.localChatExpiresAt) {
+      this.localChatText = '';
+      this._drawPlayerHeadCanvas(this.localHeadSprite, this.localNickname, '');
+    }
+
+    for (const entry of this.remotePlayers.values()) {
+      // Smoothly interpolate position
+      const dist = entry.currentPos.distanceTo(entry.targetPos);
+      if (dist > 4.5) {
+        entry.currentPos.copy(entry.targetPos);
+      } else {
+        entry.currentPos.lerp(entry.targetPos, Math.min(1, dt * 10.5));
+      }
+      entry.group.position.copy(entry.currentPos);
+
+      // Smoothly interpolate rotation angle
+      let angleDiff = entry.targetRotY - entry.currentRotY;
+      while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+      while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+      entry.currentRotY += angleDiff * Math.min(1, dt * 11);
+      entry.group.rotation.y = entry.currentRotY;
+
+      const movingNow = !entry.isSeated && (entry.isMoving || dist > 0.08);
+      animateCuteMascot(entry.rig, {
+        isMoving: movingNow,
+        isSeated: entry.isSeated,
+        hasHeldLP: Boolean(entry.heldLPId),
+        elapsed
+      });
+
+      // Expire remote speech bubble when timer finishes
+      if (entry.chatText && entry.chatExpiresAt && now > entry.chatExpiresAt) {
+        entry.chatText = '';
+        this._drawPlayerHeadCanvas(entry.labelSprite, entry.nickname, '');
+      }
+    }
   }
 
   _attachRigsByGender() {
@@ -1317,6 +1607,7 @@ export class LPBarWorld {
       this.charRotY = this.cameraOrbitAngle;
       this.charGroup.rotation.y = this.charRotY;
     }
+    this._notifyLocalTransformChange(true, false);
   }
 
   setCharacterHeldLP(lp) {
@@ -1331,6 +1622,7 @@ export class LPBarWorld {
     } else {
       this.activePlayerRig.heldLPMesh.visible = false;
     }
+    this._notifyLocalTransformChange(true, false);
   }
 
   // =========================================================================
@@ -1365,6 +1657,7 @@ export class LPBarWorld {
 
     this.isSeated = false;
     this.seatedTableId = null;
+    this.seatedChairIndex = 0;
     this.walkTarget = null;
     this.activeShelfId = shelfId;
     this.cameraMode = 'shelf-closeup';
@@ -1374,6 +1667,7 @@ export class LPBarWorld {
     this.charRotY = Math.PI; // Facing -Z (straight at the shelf)
     this.charGroup.position.copy(this.charPos);
     this.charGroup.rotation.y = this.charRotY;
+    this._notifyLocalTransformChange(true, false);
 
     // 1st-person front-facing close-up camera looking directly at the shelf's records
     const sx = entry.shelfData.position.x;
@@ -1394,6 +1688,8 @@ export class LPBarWorld {
     this.cameraMode = 'walk';
     // Step character slightly back so they can freely walk around
     this.charPos.z = Math.min(this.charPos.z + 0.65, 8.5);
+    this.charGroup.position.copy(this.charPos);
+    this._notifyLocalTransformChange(true, false);
   }
 
   enterUserCornerCloseup() {
@@ -1401,6 +1697,7 @@ export class LPBarWorld {
 
     this.isSeated = false;
     this.seatedTableId = null;
+    this.seatedChairIndex = 0;
     this.walkTarget = null;
     this.activeShelfId = 'user-corner';
     this.cameraMode = 'user-corner-closeup';
@@ -1411,6 +1708,7 @@ export class LPBarWorld {
     this.charRotY = -Math.PI / 2; // Facing -X directly at the User LP Corner
     this.charGroup.position.copy(this.charPos);
     this.charGroup.rotation.y = this.charRotY;
+    this._notifyLocalTransformChange(true, false);
 
     // 1st-Person front-facing close-up camera looking straight into the User Story LP Corner
     const cx = this.userCornerEntry.position.x;
@@ -1431,9 +1729,10 @@ export class LPBarWorld {
     this.cameraMode = 'walk';
     this.charPos.x = Math.min(this.charPos.x + 0.7, 14.0);
     this.charGroup.position.copy(this.charPos);
+    this._notifyLocalTransformChange(true, false);
   }
 
-  sitAtTable(tableId) {
+  sitAtTable(tableId, preferredSeatIndex = null) {
     const entry = this.tableMeshes.get(tableId);
     if (!entry) return;
 
@@ -1441,20 +1740,28 @@ export class LPBarWorld {
     this.walkTarget = null;
     this.isSeated = true;
     this.seatedTableId = tableId;
-    this.cameraMode = 'table-closeup';
+    // Keep default walk camera view (no forced close-up zoom-in lock)
+    this.cameraMode = 'walk';
 
-    // Place player character on Chair #0 of this table
-    const seat0 = entry.chairWorldSeats[0];
-    this.charPos.copy(seat0.pos);
-    this.charRotY = seat0.rotY;
-    this.charGroup.position.copy(this.charPos);
-    this.charGroup.rotation.y = this.charRotY;
+    // Choose an available chair index so multiple players can sit together around the same table
+    const seats = entry.chairWorldSeats || [];
+    let seatIdx = 0;
+    if (Number.isFinite(preferredSeatIndex)) {
+      seatIdx = preferredSeatIndex % Math.max(1, seats.length);
+    } else if (this.callbacks.getAvailableSeatIndex) {
+      seatIdx = this.callbacks.getAvailableSeatIndex(tableId, seats.length || 2);
+    }
+    this.seatedChairIndex = seatIdx;
 
-    // Camera glides to a warm close-up view of this table & its 3D turntable
-    const tx = entry.tableData.position.x;
-    const tz = entry.tableData.position.z;
-    this.cameraTargetPos.set(tx + 0.55, 1.72, tz + 1.18);
-    this.cameraTargetLook.set(tx, 0.92, tz - 0.05);
+    const chosenSeat = seats[seatIdx] || seats[0];
+    if (chosenSeat) {
+      this.charPos.copy(chosenSeat.pos);
+      this.charRotY = chosenSeat.rotY;
+      this.charGroup.position.copy(this.charPos);
+      this.charGroup.rotation.y = this.charRotY;
+    }
+
+    this._notifyLocalTransformChange(true, false);
 
     if (this.callbacks.onSitAtTable) {
       this.callbacks.onSitAtTable(entry.tableData);
@@ -1466,6 +1773,7 @@ export class LPBarWorld {
     const prevTableId = this.seatedTableId;
     this.isSeated = false;
     this.seatedTableId = null;
+    this.seatedChairIndex = 0;
     this.cameraMode = 'walk';
 
     const entry = this.tableMeshes.get(prevTableId);
@@ -1477,6 +1785,7 @@ export class LPBarWorld {
       );
       this.charGroup.position.copy(this.charPos);
     }
+    this._notifyLocalTransformChange(true, false);
   }
 
   focusZone(zone) {
@@ -1515,6 +1824,32 @@ export class LPBarWorld {
   // =========================================================================
   // 8. INPUT EVENTS (Keyboard WASD/Arrows, Mouse Click-to-Walk/Interact, Orbit)
   // =========================================================================
+  _isTypingInTextField() {
+    const el = document.activeElement;
+    if (!el) return false;
+    const tag = el.tagName;
+    if (tag === 'TEXTAREA' || tag === 'SELECT') return true;
+    if (tag === 'INPUT') {
+      const type = (el.type || 'text').toLowerCase();
+      return ['text', 'search', 'email', 'tel', 'url', 'password', 'number'].includes(type);
+    }
+    return el.isContentEditable === true;
+  }
+
+  _normalizeMovementKey(e) {
+    const code = e.code;
+    const key = e.key;
+    if (code === 'KeyW' || key === 'w' || key === 'W' || key === 'ㅈ' || key === 'ㅉ') return 'KeyW';
+    if (code === 'KeyA' || key === 'a' || key === 'A' || key === 'ㅁ') return 'KeyA';
+    if (code === 'KeyS' || key === 's' || key === 'S' || key === 'ㄴ') return 'KeyS';
+    if (code === 'KeyD' || key === 'd' || key === 'D' || key === 'ㅇ') return 'KeyD';
+    if (code === 'ArrowUp' || key === 'ArrowUp') return 'ArrowUp';
+    if (code === 'ArrowDown' || key === 'ArrowDown') return 'ArrowDown';
+    if (code === 'ArrowLeft' || key === 'ArrowLeft') return 'ArrowLeft';
+    if (code === 'ArrowRight' || key === 'ArrowRight') return 'ArrowRight';
+    return code;
+  }
+
   _bindEvents() {
     window.addEventListener('resize', () => {
       this.camera.aspect = window.innerWidth / window.innerHeight;
@@ -1523,12 +1858,25 @@ export class LPBarWorld {
     });
 
     window.addEventListener('keydown', (e) => {
-      if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName)) return;
-      this.keys[e.code] = true;
+      if (this._isTypingInTextField()) return;
+      const normKey = this._normalizeMovementKey(e);
+      if (normKey) {
+        this.keys[normKey] = true;
+      }
     });
 
     window.addEventListener('keyup', (e) => {
-      this.keys[e.code] = false;
+      const normKey = this._normalizeMovementKey(e);
+      if (normKey) {
+        this.keys[normKey] = false;
+      }
+      if (e.code) {
+        this.keys[e.code] = false;
+      }
+    });
+
+    window.addEventListener('blur', () => {
+      this.keys = {};
     });
 
     // Right-click drag to orbit camera in walk mode, wheel to zoom
@@ -1537,10 +1885,14 @@ export class LPBarWorld {
     this.renderer.domElement.addEventListener('contextmenu', (e) => e.preventDefault());
 
     this.renderer.domElement.addEventListener('mousedown', (e) => {
+      // Blur any focused button/slider/checkbox so keyboard shortcuts always work immediately
+      if (document.activeElement && !this._isTypingInTextField() && document.activeElement !== document.body) {
+        document.activeElement.blur?.();
+      }
       if (e.button === 2) {
         isRightDragging = true;
         prevX = e.clientX;
-      } else if (e.button === 0 && this.cameraMode === 'walk') {
+      } else if (e.button === 0 && this.cameraMode === 'walk' && !this.isSeated) {
         this._handleCanvasClick(e);
       }
     });
@@ -1636,6 +1988,7 @@ export class LPBarWorld {
     const elapsed = this.clock.getElapsedTime();
 
     this._updateCharacterMovement(dt, elapsed);
+    this._updateRemotePlayers(dt, elapsed);
     this._updateProximityAndAutoCloseup();
     this._updateTurntablesAndLights(dt, elapsed);
     this._updateCamera(dt);
@@ -1706,6 +2059,9 @@ export class LPBarWorld {
     this.charGroup.position.copy(this.charPos);
     this.charGroup.rotation.y = this.charRotY;
 
+    // Broadcast local character position/state to multiplayer peers
+    this._notifyLocalTransformChange(false, isMoving);
+
     // Animate cute 2-head-tall waddling character (`캐릭터샘플.png` proportions)
     animateCuteMascot(this.activePlayerRig, {
       isMoving,
@@ -1724,7 +2080,7 @@ export class LPBarWorld {
   }
 
   _updateProximityAndAutoCloseup() {
-    if (this.cameraMode !== 'walk') {
+    if (this.cameraMode !== 'walk' || this.isSeated) {
       if (this.callbacks.onProximityChange) {
         this.callbacks.onProximityChange(null);
       }
@@ -1751,7 +2107,7 @@ export class LPBarWorld {
     // 0) Check distance to the Real User Story LP Corner (찐 유저 추천 사연 LP 코너)
     if (this.userCornerEntry) {
       const d = this.charPos.distanceTo(this.userCornerEntry.standPoint);
-      if (d < 2.6 && d < minDist) {
+      if (d < 3.1 && d < minDist) {
         minDist = d;
         closest = {
           type: 'user-corner',
@@ -1769,7 +2125,7 @@ export class LPBarWorld {
     // 1) Check distance to the 6 Genre LP Bookshelves
     for (const [shelfId, entry] of this.shelfMeshes.entries()) {
       const d = this.charPos.distanceTo(entry.standPoint);
-      if (d < 2.4 && d < minDist) {
+      if (d < 2.9 && d < minDist) {
         minDist = d;
         closest = {
           type: 'shelf',
@@ -1783,7 +2139,7 @@ export class LPBarWorld {
     // 2) Check distance to the 8 Tables (2-person & 4-person)
     for (const [tableId, entry] of this.tableMeshes.entries()) {
       const d = this.charPos.distanceTo(new THREE.Vector3(entry.tableData.position.x, 0, entry.tableData.position.z));
-      if (d < 2.65 && d < minDist) {
+      if (d < 3.15 && d < minDist) {
         minDist = d;
         closest = {
           type: 'table',

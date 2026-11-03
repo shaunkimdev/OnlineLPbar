@@ -17,6 +17,7 @@ import {
 } from './data/userMusicService.js';
 import { AudioEngine } from './audio/AudioEngine.js';
 import { LPBarWorld } from './world/LPBarWorld.js';
+import { MultiplayerSync, generateRandomNickname } from './network/MultiplayerSync.js';
 
 const initialUserSongs = loadUserRecommendedSongs();
 
@@ -52,6 +53,7 @@ const state = {
 
 const audio = new AudioEngine();
 let world = null;
+let mp = null;
 
 // Helper to apply LP cover image with automatic procedural fallback if external URL fails
 function applyLPCoverImage(imgEl, lp) {
@@ -92,7 +94,13 @@ window.addEventListener('DOMContentLoaded', () => {
     onProximityChange: (prox) => updateProximityPrompt(prox),
     onEnterShelfCloseup: (shelfData) => openShelfDiggingUI(shelfData),
     onEnterUserCornerCloseup: () => openUserCornerUI(),
-    onSitAtTable: (tableData) => handleCharacterSatAtTable(tableData)
+    onSitAtTable: (tableData) => handleCharacterSatAtTable(tableData),
+    getAvailableSeatIndex: (tableId, capacity) => (mp ? mp.findAvailableSeatIndex(tableId, capacity) : 0),
+    onPlayerTransformChange: (transformState, forceImmediate) => {
+      if (mp) {
+        mp.updateLocalTransform(transformState, forceImmediate);
+      }
+    }
   });
 
   audio.onStatusChange = (statusText) => {
@@ -109,6 +117,7 @@ window.addEventListener('DOMContentLoaded', () => {
     }
   };
 
+  setupMultiplayerSync();
   setupEntranceOverlay();
   setupTopHUD();
   setupShelfDiggingUI();
@@ -129,6 +138,9 @@ window.addEventListener('DOMContentLoaded', () => {
 
 function syncGenderUI(gender) {
   world.setPlayerGender(gender);
+  if (mp) {
+    mp.setGender(gender);
+  }
   document.querySelectorAll('.char-choice-btn').forEach((b) => {
     b.classList.toggle('active', b.dataset.gender === gender);
   });
@@ -147,6 +159,26 @@ function syncGenderUI(gender) {
 function setupEntranceOverlay() {
   const overlay = document.getElementById('entrance-overlay');
   const btnEnter = document.getElementById('btn-enter-bar');
+  const nickInput = document.getElementById('entrance-nickname');
+  const btnRandomNick = document.getElementById('btn-random-nickname');
+
+  if (nickInput && mp) {
+    nickInput.value = mp.localPlayer.nickname;
+    nickInput.addEventListener('input', () => {
+      const val = nickInput.value.trim();
+      if (val) {
+        updateLocalNickname(val);
+      }
+    });
+  }
+
+  if (btnRandomNick && nickInput) {
+    btnRandomNick.addEventListener('click', () => {
+      const randNick = generateRandomNickname();
+      nickInput.value = randNick;
+      updateLocalNickname(randNick);
+    });
+  }
 
   document.querySelectorAll('.char-choice-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
@@ -155,11 +187,18 @@ function setupEntranceOverlay() {
   });
 
   btnEnter.addEventListener('click', async () => {
+    if (nickInput) {
+      const nickVal = nickInput.value.trim() || generateRandomNickname();
+      updateLocalNickname(nickVal);
+    }
     await audio.init();
     audio.playSleeveFlip();
     overlay.style.opacity = '0';
     setTimeout(() => overlay.classList.add('hidden'), 480);
-    showToast('🎷 미드나잇 그루브 LP바에 오신 것을 환영합니다! 앞쪽 장르별 LP 책장으로 걸어가 보세요.');
+    if (mp) {
+      mp.broadcastPresence();
+    }
+    showToast(`🎷 [${mp ? mp.localPlayer.nickname : '디거'}]님, 미드나잇 그루브 LP바에 오신 것을 환영합니다!`);
   });
 }
 
@@ -212,6 +251,9 @@ function setupTopHUD() {
   btnMood.addEventListener('click', () => {
     const nextName = world.cycleMood();
     moodNameEl.textContent = nextName;
+    if (mp) {
+      mp.broadcastMoodChanged(world.moodIndex, nextName);
+    }
     showToast(`🕯️ 바 조명 테마가 [${nextName}] 모드로 변경되었습니다.`);
   });
 
@@ -975,7 +1017,7 @@ function updateUserCornerInspector(lp) {
   }
 }
 
-function startUserCornerPlayback(lp, withNeedleDrop = true) {
+function startUserCornerPlayback(lp, withNeedleDrop = true, isRemoteSync = false) {
   if (!lp) return;
 
   // Pause any table turntable that was playing
@@ -993,14 +1035,22 @@ function startUserCornerPlayback(lp, withNeedleDrop = true) {
   world.updateUserCornerVisuals(state.userSongs, lp, true);
   audio.startTurntableLP(lp, lp.rpm || 33, withNeedleDrop);
 
+  if (!isRemoteSync && mp) {
+    mp.broadcastUserCornerPlayback(lp, true);
+  }
+
   updateUserCornerInspector(lp);
   refreshNowPlayingBar();
 }
 
-function stopUserCornerPlayback() {
+function stopUserCornerPlayback(isRemoteSync = false) {
   state.userCornerPlaying = false;
   world.updateUserCornerVisuals(state.userSongs, state.userCornerActiveLP, false);
   audio.stopTurntable(true);
+
+  if (!isRemoteSync && mp) {
+    mp.broadcastUserCornerPlayback(state.userCornerActiveLP, false);
+  }
 
   const currentLP = state.filteredUserSongs[state.selectedUserLPIndex];
   if (currentLP) updateUserCornerInspector(currentLP);
@@ -1025,6 +1075,10 @@ function handleHeartCurrentUserSong() {
 
   state.heartState.counts[lp.id] = lp.heartCount;
   saveHeartState(state.heartState);
+
+  if (mp) {
+    mp.broadcastUserSongHeart(lp.id, lp.heartCount);
+  }
 
   // Update ribbon heart count on the active card
   const activeCardRibbonStrong = document.querySelector(
@@ -1456,15 +1510,21 @@ async function submitUserSongRecommendation() {
     state.selectedUserLPIndex = 0;
 
     // Also add a note to the Whiskey Coaster Guestbook so visitors see it there too
-    state.coasters.unshift({
+    const autoCoaster = {
       id: 'c-' + Date.now(),
       nickname: name,
       table: '💌 유저 사연 LP 코너',
       lpTitle: `${title} — ${artist}`,
       message: scene.length > 110 ? scene.slice(0, 110) + '…' : scene,
       time: '방금 추천됨'
-    });
+    };
+    state.coasters.unshift(autoCoaster);
     renderCoasterNotes();
+
+    if (mp) {
+      mp.broadcastUserSongAdded(newSongLP);
+      mp.broadcastCoasterAdded(autoCoaster);
+    }
 
     // Update 3D User LP Corner wall jackets & turntable
     world.updateUserCornerVisuals(state.userSongs, newSongLP, true);
@@ -1626,7 +1686,7 @@ function placeLPOnTableAndPlay(tableData, lp) {
   startTableTurntable(tableData, true);
 }
 
-function startTableTurntable(tableData, withNeedleDrop = true) {
+function startTableTurntable(tableData, withNeedleDrop = true, isRemoteSync = false) {
   if (!tableData.currentLP) return;
 
   // Stop User Corner turntable if it was playing
@@ -1649,14 +1709,23 @@ function startTableTurntable(tableData, withNeedleDrop = true) {
   world.updateTableTurntableVisual(tableData.id);
   audio.startTurntableLP(tableData.currentLP, tableData.rpm, withNeedleDrop);
 
+  if (!isRemoteSync && mp) {
+    mp.broadcastTableUpdate(tableData, 'play');
+  }
+
   refreshTableHUD();
   refreshNowPlayingBar();
 }
 
-function stopTableTurntable(tableData) {
+function stopTableTurntable(tableData, isRemoteSync = false) {
   tableData.isPlaying = false;
   world.updateTableTurntableVisual(tableData.id);
   audio.stopTurntable(true);
+
+  if (!isRemoteSync && mp) {
+    mp.broadcastTableUpdate(tableData, 'pause');
+  }
+
   refreshTableHUD();
   refreshNowPlayingBar();
 }
@@ -1664,6 +1733,9 @@ function stopTableTurntable(tableData) {
 function setTableRPM(rpm) {
   if (state.seatedTable) {
     state.seatedTable.rpm = rpm;
+    if (mp) {
+      mp.broadcastTableUpdate(state.seatedTable, 'rpm');
+    }
   }
   audio.setRPM(rpm);
   document.getElementById('btn-rpm-33').classList.toggle('active', rpm === 33);
@@ -1967,14 +2039,20 @@ function setupCoasterGuestbook() {
       ? `${currentLP.title} — ${currentLP.artist}`
       : 'Midnight Groove House Vinyl';
 
-    state.coasters.unshift({
+    const newCoaster = {
       id: 'c-' + Date.now(),
       nickname: nick,
       table,
       lpTitle,
       message: msg,
       time: '방금 전'
-    });
+    };
+
+    state.coasters.unshift(newCoaster);
+
+    if (mp) {
+      mp.broadcastCoasterAdded(newCoaster);
+    }
 
     document.getElementById('coaster-message').value = '';
     renderCoasterNotes();
@@ -2056,37 +2134,437 @@ function setupCustomLPModal() {
 }
 
 // =========================================================================
+// 9-B. REAL-TIME MULTIPLAYER SYNCHRONIZATION & LOUNGE CHAT
+// =========================================================================
+function updateLocalNickname(nick) {
+  const safeNick = (nick || '익명의 디거').trim().slice(0, 16);
+  if (mp) {
+    mp.setNickname(safeNick);
+  }
+  if (world) {
+    world.updateLocalPlayerLabel(safeNick);
+  }
+  const myNickEl = document.getElementById('mp-my-nickname');
+  if (myNickEl) myNickEl.textContent = safeNick;
+}
+
+function setupMultiplayerSync() {
+  const initialNick = generateRandomNickname();
+  mp = new MultiplayerSync({
+    nickname: initialNick,
+    gender: world ? world.playerGender : 'male'
+  });
+
+  const myNickEl = document.getElementById('mp-my-nickname');
+  if (myNickEl) myNickEl.textContent = initialNick;
+  if (world) {
+    world.updateLocalPlayerLabel(initialNick);
+  }
+
+  // 1. Connection status
+  const connBadge = document.getElementById('mp-conn-badge');
+  const liveDot = document.getElementById('mp-live-dot');
+  const panelDot = document.getElementById('mp-panel-dot');
+
+  mp.onConnectionChange = (connected) => {
+    if (connBadge) {
+      connBadge.textContent = connected ? '실시간 동기화' : '재연결 중';
+      connBadge.classList.toggle('online', connected);
+    }
+    if (liveDot) liveDot.classList.toggle('online', connected);
+    if (panelDot) panelDot.classList.toggle('online', connected);
+  };
+
+  // 2. Peer updates & joins
+  mp.onPeerUpdate = (peerData, isNew) => {
+    if (world) {
+      world.updateRemotePeer(peerData);
+    }
+    if (isNew) {
+      appendChatMessage({
+        sender: 'system',
+        text: `👋 [${peerData.nickname || '새로운 디거'}]님이 LP바에 입장했습니다.`
+      });
+      showToast(`👋 [${peerData.nickname || '새로운 디거'}]님이 LP바에 입장했습니다.`);
+    }
+  };
+
+  mp.onPeerLeave = (peerId, peerData) => {
+    if (world) {
+      world.removeRemotePeer(peerId);
+    }
+    appendChatMessage({
+      sender: 'system',
+      text: `🚪 [${peerData?.nickname || '디거'}]님이 퇴장했습니다.`
+    });
+  };
+
+  // 3. Online count and peer chips
+  mp.onPeersCountChange = (count, peers) => {
+    const onlineCountEl = document.getElementById('mp-online-count');
+    const panelCountEl = document.getElementById('mp-panel-count');
+    if (onlineCountEl) onlineCountEl.textContent = String(count);
+    if (panelCountEl) panelCountEl.textContent = String(count);
+
+    renderPeerChips(peers);
+  };
+
+  // 4. Chat messages
+  mp.onChatMessage = (msg) => {
+    appendChatMessage(msg);
+  };
+
+  // 5. Table turntables sync
+  mp.onTableUpdate = (payload) => {
+    const table = state.tables.find((t) => t.id === payload.tableId);
+    if (!table) return;
+
+    table.currentLP = payload.currentLP;
+    table.rpm = payload.rpm || 33;
+    table.isPlaying = Boolean(payload.isPlaying);
+
+    if (world) {
+      world.updateTableTurntableVisual(table.id);
+    }
+
+    if (table.isPlaying) {
+      state.playingTableId = table.id;
+      // If user is seated at this table, start turntable audio
+      if (state.seatedTable && state.seatedTable.id === table.id) {
+        audio.startTurntableLP(table.currentLP, table.rpm, true);
+        refreshTableHUD();
+      } else if (!state.seatedTable && !state.userCornerPlaying) {
+        // If not playing anything else, enjoy the bar's playing turntable
+        audio.startTurntableLP(table.currentLP, table.rpm, false);
+      }
+      showToast(`🎵 [${table.name}]에서 '${table.currentLP?.title || 'LP'}' 음악이 재생 중입니다.`);
+    } else {
+      if (state.playingTableId === table.id) {
+        state.playingTableId = null;
+        if (state.seatedTable && state.seatedTable.id === table.id) {
+          audio.stopTurntable(true);
+          refreshTableHUD();
+        } else if (!state.userCornerPlaying) {
+          audio.stopTurntable(true);
+        }
+      }
+    }
+
+    refreshNowPlayingBar();
+  };
+
+  // 6. User Song & Story recommendation sync
+  mp.onUserSongAdded = (payload) => {
+    const newSong = payload.songLP;
+    if (!newSong || !newSong.id) return;
+    const exists = state.userSongs.some((s) => s.id === newSong.id);
+    if (!exists) {
+      state.userSongs.unshift(newSong);
+      state.filteredUserSongs = state.activeMoodFilter === 'all'
+        ? [...state.userSongs]
+        : state.userSongs.filter((s) => s.mood === state.activeMoodFilter);
+
+      if (world) {
+        world.updateUserCornerVisuals(state.userSongs, state.userCornerActiveLP || newSong, state.userCornerPlaying);
+      }
+      if (state.openUserCorner) {
+        renderUserCornerCrateCards(false);
+      }
+      appendChatMessage({
+        sender: 'system',
+        text: `💌 [${newSong.recommender?.name || '유저'}]님이 새 사연곡 '${newSong.title}'을(를) 추천했습니다!`
+      });
+      showToast(`💌 [${newSong.recommender?.name || '유저'}]님이 새 사연곡 '${newSong.title}'을(를) 추천했습니다!`);
+    }
+  };
+
+  mp.onUserSongHeart = (payload) => {
+    const song = state.userSongs.find((s) => s.id === payload.songId);
+    if (song) {
+      song.heartCount = payload.heartCount;
+      state.heartState.counts[song.id] = payload.heartCount;
+      saveHeartState(state.heartState);
+      if (state.openUserCorner) {
+        const cur = state.filteredUserSongs[state.selectedUserLPIndex];
+        if (cur && cur.id === song.id) {
+          const hcEl = document.getElementById('uc-heart-count');
+          if (hcEl) hcEl.textContent = String(song.heartCount);
+        }
+      }
+    }
+  };
+
+  // 7. User Corner playback sync
+  mp.onUserCornerPlayback = (payload) => {
+    if (world) {
+      world.updateUserCornerVisuals(state.userSongs, payload.activeLP, payload.isPlaying);
+    }
+    if (payload.isPlaying && payload.activeLP) {
+      state.userCornerActiveLP = payload.activeLP;
+      // If user isn't seated at an active playing table, let them hear what the User Corner is playing
+      if (!state.seatedTable?.isPlaying) {
+        audio.startTurntableLP(payload.activeLP, payload.activeLP.rpm || 33, false);
+      }
+      refreshNowPlayingBar();
+    }
+  };
+
+  // 8. Whiskey coaster guestbook note sync
+  mp.onCoasterAdded = (payload) => {
+    const note = payload.coasterNote;
+    if (!note || !note.id) return;
+    const exists = state.coasters.some((c) => c.id === note.id);
+    if (!exists) {
+      state.coasters.unshift(note);
+      renderCoasterNotes();
+      showToast(`🥃 [${note.nickname}]님이 방명록 코스터를 남겼습니다: "${note.message.slice(0, 25)}…"`);
+    }
+  };
+
+  // 9. Mood lighting sync
+  mp.onMoodChanged = (payload) => {
+    if (world && Number.isFinite(payload.moodIndex)) {
+      const moodName = world.setMoodByIndex(payload.moodIndex);
+      const moodNameEl = document.getElementById('mood-name');
+      if (moodNameEl) moodNameEl.textContent = moodName;
+      showToast(`🕯️ 조명 테마가 [${moodName}] 모드로 동기화되었습니다.`);
+    }
+  };
+
+  // 10. State Snapshot for newly connecting peers
+  mp.onStateRequest = () => {
+    return {
+      tables: state.tables.map((t) => ({
+        id: t.id,
+        currentLP: t.currentLP,
+        isPlaying: t.isPlaying,
+        rpm: t.rpm
+      })),
+      coasters: state.coasters.slice(0, 15),
+      moodIndex: world ? world.moodIndex : 0,
+      userCornerPlaying: state.userCornerPlaying,
+      userCornerActiveLP: state.userCornerActiveLP
+    };
+  };
+
+  mp.onStateSnapshot = (snap) => {
+    if (!snap) return;
+    if (Array.isArray(snap.tables)) {
+      snap.tables.forEach((st) => {
+        const localT = state.tables.find((t) => t.id === st.id);
+        if (localT && st.currentLP) {
+          localT.currentLP = st.currentLP;
+          localT.isPlaying = Boolean(st.isPlaying);
+          localT.rpm = st.rpm || 33;
+          if (world) world.updateTableTurntableVisual(localT.id);
+        }
+      });
+    }
+    if (Array.isArray(snap.coasters) && snap.coasters.length > 0) {
+      snap.coasters.forEach((c) => {
+        if (!state.coasters.some((ex) => ex.id === c.id)) {
+          state.coasters.push(c);
+        }
+      });
+      renderCoasterNotes();
+    }
+    if (Number.isFinite(snap.moodIndex) && world) {
+      const moodName = world.setMoodByIndex(snap.moodIndex);
+      const moodNameEl = document.getElementById('mood-name');
+      if (moodNameEl) moodNameEl.textContent = moodName;
+    }
+  };
+
+  // 11. Chat UI events
+  setupChatUI();
+}
+
+function renderPeerChips(peers) {
+  const container = document.getElementById('mp-peer-chips');
+  if (!container) return;
+  container.innerHTML = '';
+
+  // Local player chip
+  const myChip = document.createElement('div');
+  myChip.className = 'mp-peer-chip my-chip';
+  const myGenderIcon = world?.playerGender === 'female' ? '👧' : '👦';
+  myChip.innerHTML = `<span class="peer-gender">${myGenderIcon}</span><strong>${mp?.localPlayer?.nickname || '나'}</strong><small>(나)</small>`;
+  container.appendChild(myChip);
+
+  // Other peers
+  peers.forEach((peer) => {
+    const chip = document.createElement('div');
+    chip.className = 'mp-peer-chip';
+    const pGenderIcon = peer.gender === 'female' ? '👧' : '👦';
+    let statusText = '';
+    if (peer.isSeated && peer.seatedTableId) {
+      statusText = ` · ${peer.seatedTableId} 착석`;
+    }
+    chip.innerHTML = `<span class="peer-gender">${pGenderIcon}</span><span>${peer.nickname || '디거'}</span><small>${statusText}</small>`;
+    container.appendChild(chip);
+  });
+}
+
+function appendChatMessage(msg) {
+  const container = document.getElementById('mp-chat-messages');
+  if (!container) return;
+
+  const div = document.createElement('div');
+  if (msg.sender === 'system') {
+    div.className = 'mp-msg mp-msg-system';
+    div.innerHTML = `<span>${msg.text}</span>`;
+  } else {
+    const isMe = msg.peerId === mp?.localPlayer?.id;
+    div.className = `mp-msg ${isMe ? 'mp-msg-mine' : 'mp-msg-peer'}`;
+    const timeStr = new Date(msg.timestamp || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    div.innerHTML = `
+      <div class="mp-msg-sender">${isMe ? '★ 나' : msg.nickname} <time>${timeStr}</time></div>
+      <div class="mp-msg-content">${msg.text}</div>
+    `;
+  }
+  container.appendChild(div);
+  container.scrollTop = container.scrollHeight;
+}
+
+function setupChatUI() {
+  const panel = document.getElementById('mp-chat-panel');
+  const btnToggle = document.getElementById('btn-toggle-mp-chat');
+  const pillBtn = document.getElementById('mp-online-pill');
+  const chatForm = document.getElementById('mp-chat-form');
+  const chatInput = document.getElementById('mp-chat-input');
+
+  const togglePanel = () => {
+    if (panel) {
+      panel.classList.toggle('collapsed');
+      if (btnToggle) {
+        btnToggle.textContent = panel.classList.contains('collapsed') ? '▴' : '▾';
+      }
+    }
+  };
+
+  if (btnToggle) btnToggle.addEventListener('click', togglePanel);
+  if (pillBtn) pillBtn.addEventListener('click', togglePanel);
+
+  if (chatForm && chatInput) {
+    chatForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const text = chatInput.value.trim();
+      if (!text) return;
+
+      if (mp) {
+        mp.broadcastChatMessage(text);
+      }
+      if (world) {
+        world.updateLocalPlayerLabel(mp ? mp.localPlayer.nickname : '나', text);
+      }
+      appendChatMessage({
+        peerId: mp?.localPlayer?.id,
+        nickname: mp?.localPlayer?.nickname || '나',
+        text,
+        timestamp: Date.now()
+      });
+      chatInput.value = '';
+    });
+  }
+}
+
+// =========================================================================
 // 10. GLOBAL KEYBOARD SHORTCUTS (Shelf, 1st-Person User Corner & World)
 // =========================================================================
-function setupGlobalHotkeys() {
-  window.addEventListener('keydown', (e) => {
-    if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName)) return;
+function isTypingInTextField() {
+  const el = document.activeElement;
+  if (!el) return false;
+  const tag = el.tagName;
+  if (tag === 'TEXTAREA' || tag === 'SELECT') return true;
+  if (tag === 'INPUT') {
+    const type = (el.type || 'text').toLowerCase();
+    return ['text', 'search', 'email', 'tel', 'url', 'password', 'number'].includes(type);
+  }
+  return el.isContentEditable === true;
+}
 
-    // If Recommend Song Modal is open, Escape closes it
+function setupGlobalHotkeys() {
+  // Automatically blur buttons, checkboxes, and range sliders after click/change
+  // so they never trap keyboard focus or block WASD / Space / Enter / ESC shortcuts
+  document.addEventListener('click', (e) => {
+    const target = e.target?.closest?.('button, input[type="checkbox"], input[type="range"]');
+    if (target && typeof target.blur === 'function') {
+      target.blur();
+    }
+  });
+
+  document.addEventListener('change', (e) => {
+    const target = e.target;
+    if (target && target.tagName === 'INPUT' && ['range', 'checkbox'].includes((target.type || '').toLowerCase())) {
+      target.blur?.();
+    }
+  });
+
+  window.addEventListener('keydown', (e) => {
+    if (isTypingInTextField()) return;
+
+    const code = e.code;
+    const key = e.key;
+
+    const isLeft = code === 'ArrowLeft' || key === 'ArrowLeft' || code === 'KeyA' || key === 'a' || key === 'A' || key === 'ㅁ';
+    const isRight = code === 'ArrowRight' || key === 'ArrowRight' || code === 'KeyD' || key === 'd' || key === 'D' || key === 'ㅇ';
+    const isSpace = code === 'Space' || key === ' ';
+    const isEnter = code === 'Enter' || key === 'Enter';
+    const isE = code === 'KeyE' || key === 'e' || key === 'E' || key === 'ㄷ' || key === 'ㄸ';
+    const isEsc = code === 'Escape' || key === 'Escape';
+    const isP = code === 'KeyP' || key === 'p' || key === 'P' || key === 'ㅔ' || key === 'ㅖ';
+    const isH = code === 'KeyH' || key === 'h' || key === 'H' || key === 'ㅗ';
+
+    // If Entrance Overlay is still visible, Enter or Space enters the bar
+    const entranceOverlay = document.getElementById('entrance-overlay');
+    if (entranceOverlay && !entranceOverlay.classList.contains('hidden')) {
+      if (isEnter || isSpace) {
+        e.preventDefault();
+        document.getElementById('btn-enter-bar')?.click();
+      }
+      return;
+    }
+
+    // If Recommend Song Modal or Custom LP Modal is open, Escape closes it
     const recModal = document.getElementById('recommend-song-modal');
     if (recModal && !recModal.classList.contains('hidden')) {
-      if (e.code === 'Escape') {
+      if (isEsc) {
         e.preventDefault();
         closeRecommendSongModal();
       }
       return;
     }
 
+    const customModal = document.getElementById('custom-lp-modal');
+    if (customModal && !customModal.classList.contains('hidden')) {
+      if (isEsc) {
+        e.preventDefault();
+        customModal.classList.add('hidden');
+      }
+      return;
+    }
+
     // A) When inside 1st-Person User Story LP Corner View:
     if (state.openUserCorner) {
-      if (e.code === 'ArrowLeft' || e.code === 'KeyA') {
+      if (isLeft) {
         e.preventDefault();
         flipUserCornerLP(-1);
-      } else if (e.code === 'ArrowRight' || e.code === 'KeyD') {
+      } else if (isRight) {
         e.preventDefault();
         flipUserCornerLP(1);
-      } else if (e.code === 'Space') {
+      } else if (isSpace) {
         e.preventDefault();
         triggerRandomUserCornerFlip();
-      } else if (e.code === 'Enter' || e.code === 'KeyE') {
+      } else if (isEnter || isE) {
         e.preventDefault();
         pickCurrentUserCornerLP();
-      } else if (e.code === 'Escape') {
+      } else if (isP) {
+        e.preventDefault();
+        document.getElementById('btn-uc-play-toggle')?.click();
+      } else if (isH) {
+        e.preventDefault();
+        handleHeartCurrentUserSong();
+      } else if (isEsc) {
         e.preventDefault();
         closeUserCornerUI(true);
       }
@@ -2095,19 +2573,19 @@ function setupGlobalHotkeys() {
 
     // B) When inside Shelf Close-Up View:
     if (state.openShelf) {
-      if (e.code === 'ArrowLeft' || e.code === 'KeyA') {
+      if (isLeft) {
         e.preventDefault();
         flipShelfLP(-1);
-      } else if (e.code === 'ArrowRight' || e.code === 'KeyD') {
+      } else if (isRight) {
         e.preventDefault();
         flipShelfLP(1);
-      } else if (e.code === 'Space') {
+      } else if (isSpace) {
         e.preventDefault();
         triggerRandomShelfFlip();
-      } else if (e.code === 'Enter' || e.code === 'KeyE') {
+      } else if (isEnter || isE) {
         e.preventDefault();
         pickCurrentShelfLP();
-      } else if (e.code === 'Escape') {
+      } else if (isEsc) {
         e.preventDefault();
         closeShelfDiggingUI(true);
       }
@@ -2116,18 +2594,44 @@ function setupGlobalHotkeys() {
 
     // C) When Seated at a Table:
     if (state.seatedTable) {
-      if (e.code === 'Escape') {
+      if (isEsc || isE) {
         e.preventDefault();
         closeTableTurntableHUD(true);
-      } else if (e.code === 'Space') {
+      } else if (isSpace || isEnter) {
         e.preventDefault();
-        document.getElementById('btn-tt-needle').click();
+        if (state.heldLP) {
+          placeLPOnTableAndPlay(state.seatedTable, state.heldLP);
+        } else {
+          document.getElementById('btn-tt-needle')?.click();
+        }
       }
       return;
     }
 
-    // D) When Walking in the 3D Bar: E or Space interacts with nearest Shelf, User Corner, or Table
-    if (e.code === 'KeyE' || e.code === 'Space') {
+    // D) Quick Zone Number Shortcuts (1 ~ 5) while walking
+    if (code === 'Digit1' || key === '1') {
+      document.getElementById('btn-zone-walk')?.click();
+      return;
+    }
+    if (code === 'Digit2' || key === '2') {
+      document.getElementById('btn-zone-user-corner')?.click();
+      return;
+    }
+    if (code === 'Digit3' || key === '3') {
+      document.getElementById('btn-zone-shelves')?.click();
+      return;
+    }
+    if (code === 'Digit4' || key === '4') {
+      document.getElementById('btn-zone-2p')?.click();
+      return;
+    }
+    if (code === 'Digit5' || key === '5') {
+      document.getElementById('btn-zone-4p')?.click();
+      return;
+    }
+
+    // E) When Walking in the 3D Bar: E, Space, or Enter interacts with nearest Shelf, User Corner, or Table
+    if (isE || isSpace || isEnter) {
       const near = world.nearestInteractable;
       if (near) {
         e.preventDefault();

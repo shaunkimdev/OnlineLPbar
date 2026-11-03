@@ -817,8 +817,17 @@ export class AudioEngine {
           onReady: () => {
             this.ytReady = true;
             this.ytPlayer.setVolume(Math.round(this.musicVolume * 100));
+            const iframe = this.ytPlayer.getIframe?.();
+            if (iframe) {
+              iframe.setAttribute('tabindex', '-1');
+            }
           },
           onStateChange: (e) => {
+            const iframe = this.ytPlayer.getIframe?.();
+            if (iframe && document.activeElement === iframe) {
+              iframe.blur();
+              window.focus();
+            }
             // YT.PlayerState.PLAYING === 1
             if (e.data === 1 && this.isPlaying && this.sourceMode === 'hybrid') {
               this.ytPlayingActive = true;
