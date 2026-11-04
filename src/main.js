@@ -94,6 +94,7 @@ window.addEventListener('DOMContentLoaded', () => {
     onProximityChange: (prox) => updateProximityPrompt(prox),
     onEnterShelfCloseup: (shelfData) => openShelfDiggingUI(shelfData),
     onEnterUserCornerCloseup: () => openUserCornerUI(),
+    onOpenRecommendSongModal: () => openRecommendSongModal(),
     onSitAtTable: (tableData) => handleCharacterSatAtTable(tableData),
     onLeaveTable: (tableId) => handleWorldLeftTable(tableId),
     getAvailableSeatIndex: (tableId, capacity) => (mp ? mp.findAvailableSeatIndex(tableId, capacity) : 0),
@@ -380,7 +381,7 @@ function updateProximityPrompt(prox) {
   if (prox.type === 'user-corner') {
     badgeEl.textContent = 'YOUR MUSIC · 1ST-PERSON BOOTH';
     titleEl.textContent = '💌 찐 유저 추천 사연 LP 코너';
-    subEl.textContent = `유저들이 직접 남긴 사연과 인생곡 ${state.userSongs.length}장이 꽂혀 있습니다. 1인칭 시점으로 사연을 읽으며 바로 들어보세요.`;
+    subEl.textContent = `유저들이 직접 남긴 사연과 인생곡 ${state.userSongs.length}장이 꽂혀 있습니다. 1인칭 시점으로 사연을 읽으며 감상하거나 나만의 노래를 추천해보세요!`;
     btnLabel.textContent = '1인칭 사연 감상 & 청음 화면으로 전환';
     btnAction.onclick = () => world.enterUserCornerCloseup();
     if (mobileActIcon) mobileActIcon.textContent = '💌';

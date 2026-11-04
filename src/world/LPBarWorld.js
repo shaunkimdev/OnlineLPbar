@@ -77,6 +77,7 @@ export class LPBarWorld {
     this.shelfMeshes = new Map(); // shelfId -> { group, hitBox, spotLight, activeSleeveMesh, ... }
     this.tableMeshes = new Map(); // tableId -> { group, hitBox, turntable, chairPositions, lampLight, notesParticles, ... }
     this.userCornerEntry = null; // 3D Real User Story LP Corner booth
+    this.userCornerSignpost = null; // 3D Arrow Signpost in front of User Corner
     this.clickableObjects = [];
     this.floorMesh = null;
 
@@ -93,6 +94,7 @@ export class LPBarWorld {
     this._buildRoomArchitecture();
     this._buildFrontGenreShelves();
     this._buildUserStoryLPCorner();
+    this._buildUserCornerSignpost();
     this._buildAllTablesWithTurntables();
     this._buildCharacter();
     this._buildAtmosphereParticles();
@@ -556,12 +558,12 @@ export class LPBarWorld {
   // 3B. REAL USER RECOMMENDED LP CORNER (찐 유저 추천 사연 LP 코너 & 청음 부스)
   // =========================================================================
   _buildUserStoryLPCorner() {
-    const cornerPos = { x: -14.8, z: -6.4 };
-    const standPoint = new THREE.Vector3(-12.25, 0, -6.4);
+    const cornerPos = { x: 0, z: -10.8 };
+    const standPoint = new THREE.Vector3(0, 0, -8.65);
 
     const group = new THREE.Group();
     group.position.set(cornerPos.x, 0, cornerPos.z);
-    group.rotation.y = Math.PI / 2; // Facing +X toward the center lounge
+    group.rotation.y = 0; // Facing +Z toward the center hall and lounge
 
     const cabinetMat = new THREE.MeshStandardMaterial({
       color: 0x3b1d36,
@@ -846,6 +848,228 @@ export class LPBarWorld {
       turntable.targetArmAngle = 0.0;
       turntable.ledMat.color.setHex(0x554433);
     }
+  }
+
+  // =========================================================================
+  // 3C. USER MUSIC RECOMMENDATION ARROW SIGNPOST (나만의 노래를 추천해보세요! 화살표 푯말)
+  // =========================================================================
+  _buildUserCornerSignpost() {
+    const signPos = { x: 1.35, z: -7.15 };
+    const standPoint = new THREE.Vector3(signPos.x, 0, signPos.z + 1.25);
+
+    const group = new THREE.Group();
+    group.position.set(signPos.x, 0, signPos.z);
+    group.rotation.y = -0.12; // Angled slightly toward the center walkway
+
+    const brassMat = new THREE.MeshStandardMaterial({
+      color: 0xffcf87,
+      roughness: 0.28,
+      metalness: 0.82
+    });
+    const darkWoodMat = new THREE.MeshStandardMaterial({
+      color: 0x24111d,
+      roughness: 0.55,
+      metalness: 0.1
+    });
+
+    // 1) Weighted cast-brass plinth
+    const basePlinth = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.3, 0.35, 0.08, 24),
+      brassMat
+    );
+    basePlinth.position.y = 0.04;
+    basePlinth.castShadow = true;
+    basePlinth.receiveShadow = true;
+    group.add(basePlinth);
+
+    const baseRing = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.08, 0.14, 0.05, 16),
+      brassMat
+    );
+    baseRing.position.y = 0.1;
+    group.add(baseRing);
+
+    // 2) Tall brass pole (height 1.45m)
+    const pole = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.032, 0.032, 1.45, 16),
+      brassMat
+    );
+    pole.position.y = 0.82;
+    pole.castShadow = true;
+    group.add(pole);
+
+    // Mid brass collar
+    const midCollar = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.048, 0.048, 0.06, 16),
+      brassMat
+    );
+    midCollar.position.y = 0.88;
+    group.add(midCollar);
+
+    // 3) Horizontal Signboard plaque (Backing frame)
+    const boardFrame = new THREE.Mesh(
+      new THREE.BoxGeometry(1.28, 0.76, 0.06),
+      darkWoodMat
+    );
+    boardFrame.position.set(0, 1.58, 0);
+    boardFrame.castShadow = true;
+    group.add(boardFrame);
+
+    // Brass frame trim
+    const topTrim = new THREE.Mesh(new THREE.BoxGeometry(1.32, 0.04, 0.07), brassMat);
+    topTrim.position.set(0, 1.96, 0);
+    const bottomTrim = new THREE.Mesh(new THREE.BoxGeometry(1.32, 0.04, 0.07), brassMat);
+    bottomTrim.position.set(0, 1.20, 0);
+    const leftTrim = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.76, 0.07), brassMat);
+    leftTrim.position.set(-0.64, 1.58, 0);
+    const rightTrim = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.76, 0.07), brassMat);
+    rightTrim.position.set(0.64, 1.58, 0);
+    group.add(topTrim, bottomTrim, leftTrim, rightTrim);
+
+    // 4) Prominent 3D Arrow Topper pointing forward/inward into the User Corner
+    const arrowGroup = new THREE.Group();
+    arrowGroup.position.set(0, 2.05, 0);
+    // Brass stem
+    const arrowStem = new THREE.Mesh(
+      new THREE.BoxGeometry(0.07, 0.14, 0.05),
+      brassMat
+    );
+    arrowStem.position.y = 0.07;
+    // Arrow head (Cone / Pyramid)
+    const arrowHead = new THREE.Mesh(
+      new THREE.ConeGeometry(0.18, 0.26, 4),
+      new THREE.MeshStandardMaterial({
+        color: 0x00d4ff,
+        emissive: 0x00a8e8,
+        emissiveIntensity: 0.8,
+        roughness: 0.2
+      })
+    );
+    arrowHead.rotation.y = Math.PI / 4; // Align diamond facing
+    arrowHead.position.y = 0.27;
+    arrowGroup.add(arrowStem, arrowHead);
+    group.add(arrowGroup);
+
+    // 5) High-res Graphic Canvas for Signboard
+    const canvas = document.createElement('canvas');
+    canvas.width = 1024;
+    canvas.height = 600;
+    const ctx = canvas.getContext('2d');
+
+    const grad = ctx.createLinearGradient(0, 0, 1024, 600);
+    grad.addColorStop(0, '#1c0c20');
+    grad.addColorStop(0.5, '#2e122b');
+    grad.addColorStop(1, '#151b2e');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 1024, 600);
+
+    // Double borders
+    ctx.strokeStyle = '#e6b86a';
+    ctx.lineWidth = 10;
+    ctx.strokeRect(16, 16, 992, 568);
+    ctx.strokeStyle = '#ff6b9d';
+    ctx.lineWidth = 4;
+    ctx.strokeRect(30, 30, 964, 540);
+
+    // Corner decorative brass rivets
+    ctx.fillStyle = '#ffcf87';
+    [[42, 42], [982, 42], [42, 558], [982, 558]].forEach(([cx, cy]) => {
+      ctx.beginPath();
+      ctx.arc(cx, cy, 6, 0, Math.PI * 2);
+      ctx.fill();
+    });
+
+    // Arrow icon at top of canvas
+    ctx.fillStyle = '#00d4ff';
+    ctx.beginPath();
+    ctx.moveTo(512, 50);
+    ctx.lineTo(554, 98);
+    ctx.lineTo(530, 98);
+    ctx.lineTo(530, 142);
+    ctx.lineTo(494, 142);
+    ctx.lineTo(494, 98);
+    ctx.lineTo(470, 98);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // Top category badge
+    ctx.font = '700 24px "JetBrains Mono", monospace';
+    ctx.fillStyle = '#ff9ebb';
+    ctx.textAlign = 'center';
+    ctx.fillText('★ MIDNIGHT VINYL RECOMMENDATION ★', 512, 185);
+
+    // Main requested text
+    ctx.shadowColor = '#ff3366';
+    ctx.shadowBlur = 18;
+    ctx.fillStyle = '#fffdf0';
+    ctx.font = '900 54px "Noto Sans KR", sans-serif';
+    ctx.fillText('나만의 노래를 추천해보세요!', 512, 268);
+    ctx.shadowBlur = 0;
+
+    // Subtitle
+    ctx.fillStyle = '#ffd54f';
+    ctx.font = '700 32px "Noto Sans KR", sans-serif';
+    ctx.fillText('💌 찐 유저 추천사연 LP 코너 💌', 512, 335);
+
+    // Guidance description
+    ctx.fillStyle = '#d6e4ff';
+    ctx.font = '500 26px "Noto Sans KR", sans-serif';
+    ctx.fillText('소중한 추억이 담긴 인생곡과 사연을 남겨주시면', 512, 398);
+    ctx.fillText('이곳 중앙 LP 청음 부스에 나만의 바이닐이 전시됩니다', 512, 442);
+
+    // Call to action button banner
+    ctx.fillStyle = '#ff5e97';
+    ctx.beginPath();
+    ctx.roundRect(140, 486, 744, 76, 20);
+    ctx.fill();
+
+    ctx.fillStyle = '#ffffff';
+    ctx.font = '800 30px "Noto Sans KR", sans-serif';
+    ctx.fillText('👉 클릭하여 사연 & 노래 추천하기 👈', 512, 535);
+
+    const signTex = new THREE.CanvasTexture(canvas);
+    signTex.colorSpace = THREE.SRGBColorSpace;
+
+    const plaqueMat = new THREE.MeshBasicMaterial({ map: signTex });
+    const frontPlaque = new THREE.Mesh(new THREE.PlaneGeometry(1.24, 0.72), plaqueMat);
+    frontPlaque.position.set(0, 1.58, 0.032);
+    group.add(frontPlaque);
+
+    // Back plaque facing opposite side so it looks finished from all angles
+    const backPlaque = new THREE.Mesh(new THREE.PlaneGeometry(1.24, 0.72), plaqueMat);
+    backPlaque.rotation.y = Math.PI;
+    backPlaque.position.set(0, 1.58, -0.032);
+    group.add(backPlaque);
+
+    // Warm accent spotlight directly illuminating the sign
+    const signLight = new THREE.PointLight(0xffd59e, 1.25, 4.2);
+    signLight.position.set(0, 2.1, 0.45);
+    group.add(signLight);
+
+    // Invisible interaction hitbox for clicking
+    const hitBox = new THREE.Mesh(
+      new THREE.BoxGeometry(1.4, 2.2, 0.8),
+      new THREE.MeshBasicMaterial({ visible: false })
+    );
+    hitBox.position.set(0, 1.4, 0);
+    hitBox.userData = {
+      type: 'user-corner-signpost',
+      standPoint: standPoint.clone()
+    };
+    group.add(hitBox);
+    this.clickableObjects.push(hitBox);
+
+    this.scene.add(group);
+    this.userCornerSignpost = {
+      group,
+      position: signPos,
+      standPoint,
+      hitBox,
+      signLight
+    };
   }
 
   // =========================================================================
@@ -1712,10 +1936,10 @@ export class LPBarWorld {
     this.activeShelfId = 'user-corner';
     this.cameraMode = 'user-corner-closeup';
 
-    // Move character neatly in front of the User Story LP Corner facing it (-X)
+    // Move character neatly in front of the User Story LP Corner facing it (-Z)
     const sp = this.userCornerEntry.standPoint;
     this.charPos.copy(sp);
-    this.charRotY = -Math.PI / 2; // Facing -X directly at the User LP Corner
+    this.charRotY = Math.PI; // Facing -Z directly at the User LP Corner
     this.charGroup.position.copy(this.charPos);
     this.charGroup.rotation.y = this.charRotY;
     this._notifyLocalTransformChange(true, false);
@@ -1723,8 +1947,8 @@ export class LPBarWorld {
     // 1st-Person front-facing close-up camera looking straight into the User Story LP Corner
     const cx = this.userCornerEntry.position.x;
     const cz = this.userCornerEntry.position.z;
-    this.cameraTargetPos.set(cx + 2.35, 2.32, cz);
-    this.cameraTargetLook.set(cx - 0.2, 2.22, cz);
+    this.cameraTargetPos.set(cx, 2.38, cz + 2.35);
+    this.cameraTargetLook.set(cx, 2.22, cz - 0.2);
 
     if (this.callbacks.onEnterUserCornerCloseup) {
       this.callbacks.onEnterUserCornerCloseup();
@@ -1737,7 +1961,8 @@ export class LPBarWorld {
     }
     this.activeShelfId = null;
     this.cameraMode = 'walk';
-    this.charPos.x = Math.min(this.charPos.x + 0.7, 14.0);
+    // Step character slightly back (+Z) so they can freely walk around
+    this.charPos.z = Math.min(this.charPos.z + 0.75, 8.5);
     this.charGroup.position.copy(this.charPos);
     this._notifyLocalTransformChange(true, false);
   }
@@ -2044,10 +2269,26 @@ export class LPBarWorld {
 
     this.raycaster.setFromCamera(this.mouse, this.camera);
 
-    // 1) Check if clicked a Shelf or a Table
+    // 1) Check if clicked a Shelf, Table, or User Corner Signpost
     const hits = this.raycaster.intersectObjects(this.clickableObjects, false);
     if (hits.length > 0) {
       const data = hits[0].object.userData;
+      if (data.type === 'user-corner-signpost') {
+        const dist = this.charPos.distanceTo(data.standPoint);
+        if (dist < 3.2) {
+          if (this.callbacks.onOpenRecommendSongModal) {
+            this.callbacks.onOpenRecommendSongModal();
+          }
+        } else {
+          this.walkTarget = data.standPoint.clone();
+          this.walkTargetCallback = () => {
+            if (this.callbacks.onOpenRecommendSongModal) {
+              this.callbacks.onOpenRecommendSongModal();
+            }
+          };
+        }
+        return;
+      }
       if (data.type === 'user-corner') {
         const dist = this.charPos.distanceTo(data.standPoint);
         if (dist < 2.9) {
@@ -2231,10 +2472,12 @@ export class LPBarWorld {
     let closest = null;
     let minDist = Infinity;
 
-    // 0) Check distance to the Real User Story LP Corner (찐 유저 추천 사연 LP 코너)
+    // 0) Check distance to the Real User Story LP Corner or Signpost
     if (this.userCornerEntry) {
-      const d = this.charPos.distanceTo(this.userCornerEntry.standPoint);
-      if (d < 3.1 && d < minDist) {
+      const dBooth = this.charPos.distanceTo(this.userCornerEntry.standPoint);
+      const dSign = this.userCornerSignpost ? this.charPos.distanceTo(this.userCornerSignpost.standPoint) : 999;
+      const d = Math.min(dBooth, dSign);
+      if (d < 3.2 && d < minDist) {
         minDist = d;
         closest = {
           type: 'user-corner',
@@ -2242,7 +2485,7 @@ export class LPBarWorld {
           data: {
             code: 'USER STORY CORNER',
             name: '찐 유저 추천 사연 LP 코너',
-            subtitle: '유저들이 직접 고른 인생곡과 사연을 1인칭 청음 시점으로 감상해보세요'
+            subtitle: '유저들이 직접 고른 인생곡과 사연을 감상하고 나만의 노래를 추천해보세요!'
           },
           dist: d
         };
@@ -2282,7 +2525,7 @@ export class LPBarWorld {
       closest &&
       closest.type === 'user-corner' &&
       this.autoShelfCloseup &&
-      closest.dist < 1.85 &&
+      this.charPos.distanceTo(this.userCornerEntry.standPoint) < 1.85 &&
       this.lastExitedShelfId !== 'user-corner'
     ) {
       this.enterUserCornerCloseup();

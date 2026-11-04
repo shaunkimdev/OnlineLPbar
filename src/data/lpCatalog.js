@@ -9,7 +9,7 @@ export const GENRE_SHELVES = [
     subtitle: '깊은 밤 위스키 온더락과 가장 잘 어울리는 스모키 재즈 명반',
     accent: '#d99b4e',
     woodColor: 0x4a2e1b,
-    position: { x: -12.5, z: -10.8 },
+    position: { x: -14.4, z: -10.8 },
     records: [
       {
         id: 'jazz-1',
@@ -99,7 +99,7 @@ export const GENRE_SHELVES = [
     subtitle: '네온사인 비치는 도쿄의 밤거리를 달리는 경쾌하고 낭만적인 아날로그 신스 & 펑크',
     accent: '#ff6b9d',
     woodColor: 0x522d38,
-    position: { x: -7.5, z: -10.8 },
+    position: { x: -9.6, z: -10.8 },
     records: [
       {
         id: 'city-1',
@@ -189,7 +189,7 @@ export const GENRE_SHELVES = [
     subtitle: 'LP 치지직 노이즈와 빗소리에 가장 완벽하게 녹아드는 로파이 힙합 & 칠 비츠',
     accent: '#7cd4b8',
     woodColor: 0x263c38,
-    position: { x: -2.5, z: -10.8 },
+    position: { x: -4.8, z: -10.8 },
     records: [
       {
         id: 'lofi-1',
@@ -279,7 +279,7 @@ export const GENRE_SHELVES = [
     subtitle: '진공관 앰프와 턴테이블의 진가를 일깨우는 70~90년대 록 & 소울 그루브',
     accent: '#e86f52',
     woodColor: 0x4b241c,
-    position: { x: 2.5, z: -10.8 },
+    position: { x: 4.8, z: -10.8 },
     records: [
       {
         id: 'rock-1',
@@ -369,7 +369,7 @@ export const GENRE_SHELVES = [
     subtitle: '유재하·김광석부터 검정치마·백예린까지, 아날로그 감성을 자극하는 한국 바이닐',
     accent: '#c59bf0',
     woodColor: 0x3b2c47,
-    position: { x: 7.5, z: -10.8 },
+    position: { x: 9.6, z: -10.8 },
     records: [
       {
         id: 'k-1',
@@ -459,7 +459,7 @@ export const GENRE_SHELVES = [
     subtitle: '한 편의 영화 속 주인공이 된 듯한 사운드트랙과 깊은 밤의 피아노 노턴',
     accent: '#e2b857',
     woodColor: 0x3d3020,
-    position: { x: 12.5, z: -10.8 },
+    position: { x: 14.4, z: -10.8 },
     records: [
       {
         id: 'ost-1',
