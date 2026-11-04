@@ -12,7 +12,9 @@ export const BAR_TABLES = [
     position: { x: -10.5, z: -2.2 },
     currentLP: null,
     isPlaying: false,
-    rpm: 33
+    rpm: 33,
+    djPeerId: null,
+    djNickname: null
   },
   {
     id: 'table-a2',
@@ -24,7 +26,9 @@ export const BAR_TABLES = [
     position: { x: -3.6, z: -2.2 },
     currentLP: null,
     isPlaying: false,
-    rpm: 33
+    rpm: 33,
+    djPeerId: null,
+    djNickname: null
   },
   {
     id: 'table-a3',
@@ -36,7 +40,9 @@ export const BAR_TABLES = [
     position: { x: 3.6, z: -2.2 },
     currentLP: null,
     isPlaying: false,
-    rpm: 33
+    rpm: 33,
+    djPeerId: null,
+    djNickname: null
   },
   {
     id: 'table-a4',
@@ -48,7 +54,9 @@ export const BAR_TABLES = [
     position: { x: 10.5, z: -2.2 },
     currentLP: null,
     isPlaying: false,
-    rpm: 33
+    rpm: 33,
+    djPeerId: null,
+    djNickname: null
   },
 
   // ================= 4인석 테이블 (4개) =================
@@ -62,7 +70,9 @@ export const BAR_TABLES = [
     position: { x: -10.5, z: 4.6 },
     currentLP: null,
     isPlaying: false,
-    rpm: 33
+    rpm: 33,
+    djPeerId: null,
+    djNickname: null
   },
   {
     id: 'table-b2',
@@ -74,7 +84,9 @@ export const BAR_TABLES = [
     position: { x: -3.6, z: 4.6 },
     currentLP: null,
     isPlaying: false,
-    rpm: 33
+    rpm: 33,
+    djPeerId: null,
+    djNickname: null
   },
   {
     id: 'table-b3',
@@ -86,7 +98,9 @@ export const BAR_TABLES = [
     position: { x: 3.6, z: 4.6 },
     currentLP: null,
     isPlaying: false,
-    rpm: 33
+    rpm: 33,
+    djPeerId: null,
+    djNickname: null
   },
   {
     id: 'table-b4',
@@ -98,7 +112,9 @@ export const BAR_TABLES = [
     position: { x: 10.5, z: 4.6 },
     currentLP: null,
     isPlaying: false,
-    rpm: 33
+    rpm: 33,
+    djPeerId: null,
+    djNickname: null
   }
 ];
 

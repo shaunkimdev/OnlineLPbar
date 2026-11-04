@@ -1796,6 +1796,10 @@ export class LPBarWorld {
       this.charGroup.position.copy(this.charPos);
     }
     this._notifyLocalTransformChange(true, false);
+
+    if (this.callbacks.onLeaveTable) {
+      this.callbacks.onLeaveTable(prevTableId);
+    }
   }
 
   focusZone(zone) {

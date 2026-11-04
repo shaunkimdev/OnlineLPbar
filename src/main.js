@@ -95,6 +95,7 @@ window.addEventListener('DOMContentLoaded', () => {
     onEnterShelfCloseup: (shelfData) => openShelfDiggingUI(shelfData),
     onEnterUserCornerCloseup: () => openUserCornerUI(),
     onSitAtTable: (tableData) => handleCharacterSatAtTable(tableData),
+    onLeaveTable: (tableId) => handleWorldLeftTable(tableId),
     getAvailableSeatIndex: (tableId, capacity) => (mp ? mp.findAvailableSeatIndex(tableId, capacity) : 0),
     onPlayerTransformChange: (transformState, forceImmediate) => {
       if (mp) {
@@ -1656,6 +1657,54 @@ async function submitUserSongRecommendation() {
 // =========================================================================
 // 5. TABLE & 3D TURNTABLE INTERACTION (2-Person & 4-Person Tables)
 // =========================================================================
+function isTableDJStillSeated(table) {
+  if (!table || !table.djPeerId) return false;
+  const myPeerId = mp?.peerId || 'local';
+  if (table.djPeerId === myPeerId) {
+    return state.seatedTable?.id === table.id;
+  }
+  if (mp && mp.peers) {
+    const peer = mp.peers.get(table.djPeerId);
+    if (peer && peer.isSeated && peer.seatedTableId === table.id) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function canModifyTableTurntable(table) {
+  if (!table) return false;
+  // If no song is actively playing, anyone seated can place or play
+  if (!table.isPlaying || !table.currentLP) return true;
+
+  // If no DJ is recorded, anyone seated can modify
+  if (!table.djPeerId) return true;
+
+  // If the local user is the DJ, they have full control
+  const myPeerId = mp?.peerId || 'local';
+  if (table.djPeerId === myPeerId) return true;
+
+  // If the DJ who started the song has left their seat, lock is released!
+  if (!isTableDJStillSeated(table)) {
+    return true;
+  }
+
+  // DJ is still seated and music is playing: cannot be modified by others!
+  return false;
+}
+
+function getSeatedPeersCount(tableId) {
+  let count = 0;
+  if (mp && mp.peers) {
+    for (const p of mp.peers.values()) {
+      if (p.isSeated && p.seatedTableId === tableId) {
+        count++;
+      }
+    }
+  }
+  return count;
+}
+
 function setupTableTurntableHUD() {
   document.getElementById('btn-leave-table').addEventListener('click', () => {
     closeTableTurntableHUD(true);
@@ -1664,6 +1713,11 @@ function setupTableTurntableHUD() {
   // Put currently held LP onto this table's turntable
   document.getElementById('btn-tt-put-held').addEventListener('click', () => {
     if (!state.seatedTable || !state.heldLP) return;
+    const table = state.seatedTable;
+    if (!canModifyTableTurntable(table)) {
+      showToast(`⚠️ 현재 [${table.djNickname || '다른 손님'}]님이 재생 중입니다. 먼저 곡을 튼 분이 일시정지하거나 자리를 비우기 전에는 변경할 수 없습니다.`);
+      return;
+    }
     placeLPOnTableAndPlay(state.seatedTable, state.heldLP);
   });
 
@@ -1671,6 +1725,11 @@ function setupTableTurntableHUD() {
   document.getElementById('btn-tt-needle').addEventListener('click', () => {
     if (!state.seatedTable) return;
     const table = state.seatedTable;
+
+    if (!canModifyTableTurntable(table)) {
+      showToast(`⚠️ 현재 [${table.djNickname || '다른 손님'}]님이 재생 중입니다. 먼저 곡을 튼 분이 일시정지하거나 자리를 비우기 전에는 변경할 수 없습니다.`);
+      return;
+    }
 
     // If table is empty and user has no held LP, load a random recommended LP so they can enjoy right away
     if (!table.currentLP) {
@@ -1703,8 +1762,20 @@ function setupTableTurntableHUD() {
   // RPM Switch (33 1/3 vs 45 RPM)
   const btn33 = document.getElementById('btn-rpm-33');
   const btn45 = document.getElementById('btn-rpm-45');
-  btn33.addEventListener('click', () => setTableRPM(33));
-  btn45.addEventListener('click', () => setTableRPM(45));
+  btn33.addEventListener('click', () => {
+    if (state.seatedTable && !canModifyTableTurntable(state.seatedTable)) {
+      showToast(`⚠️ 현재 [${state.seatedTable.djNickname || '다른 손님'}]님이 재생 중입니다.`);
+      return;
+    }
+    setTableRPM(33);
+  });
+  btn45.addEventListener('click', () => {
+    if (state.seatedTable && !canModifyTableTurntable(state.seatedTable)) {
+      showToast(`⚠️ 현재 [${state.seatedTable.djNickname || '다른 손님'}]님이 재생 중입니다.`);
+      return;
+    }
+    setTableRPM(45);
+  });
 
   // Crackle Slider inside Table HUD
   const crackleSlider = document.getElementById('tt-crackle-slider');
@@ -1749,18 +1820,46 @@ function handleCharacterSatAtTable(tableData) {
 
   setLocationStatus(`${tableData.name} 착석 중`);
 
-  // If the character walked to this table holding an LP in their hands,
-  // automatically load that LP onto this table's 3D turntable and drop the needle!
-  if (state.heldLP) {
-    const lpToPlay = state.heldLP;
-    placeLPOnTableAndPlay(tableData, lpToPlay);
-    showToast(`🪡 [${tableData.code}] 턴테이블에 '${lpToPlay.title}' LP를 올리고 바늘을 내려놓았습니다!`);
+  // Audio rule: The song playing at a table is ONLY heard when seated at that table!
+  if (tableData.isPlaying && tableData.currentLP) {
+    state.playingTableId = tableData.id;
+    audio.startTurntableLP(tableData.currentLP, tableData.rpm, true);
+
+    if (state.heldLP) {
+      if (!canModifyTableTurntable(tableData)) {
+        showToast(`🎧 [${tableData.code}]에 착석하여 [${tableData.djNickname || '다른 손님'}]님이 재생 중인 음악을 함께 듣습니다. (소지한 LP는 보관)`);
+      } else {
+        showToast(`🎧 [${tableData.code}]에 착석하여 재생 중인 '${tableData.currentLP.title}'을(를) 함께 듣습니다.`);
+      }
+    } else {
+      showToast(`🎧 [${tableData.code}]에 착석하여 '${tableData.currentLP.title}'을(를) 함께 듣습니다.`);
+    }
   } else {
-    refreshTableHUD();
+    // If table is quiet, stop any previous table audio that was playing locally
+    if (audio.isPlaying && state.playingTableId !== tableData.id) {
+      audio.stopTurntable(false);
+    }
+    state.playingTableId = null;
+
+    // If character carried an LP to an empty/quiet table, load and play it!
+    if (state.heldLP) {
+      const lpToPlay = state.heldLP;
+      placeLPOnTableAndPlay(tableData, lpToPlay);
+      showToast(`🪡 [${tableData.code}] 턴테이블에 '${lpToPlay.title}' LP를 올리고 바늘을 내려놓았습니다!`);
+    } else {
+      refreshTableHUD();
+    }
   }
+
+  refreshNowPlayingBar();
 }
 
 function placeLPOnTableAndPlay(tableData, lp) {
+  if (!canModifyTableTurntable(tableData)) {
+    showToast(`⚠️ 현재 [${tableData.djNickname || '다른 손님'}]님이 재생 중입니다. 먼저 곡을 튼 분이 일시정지하거나 자리를 비우기 전에는 변경할 수 없습니다.`);
+    return;
+  }
+
   // Stop User Corner turntable if it was playing
   if (state.userCornerPlaying) {
     state.userCornerPlaying = false;
@@ -1771,12 +1870,16 @@ function placeLPOnTableAndPlay(tableData, lp) {
   state.tables.forEach((t) => {
     if (t.id !== tableData.id && t.isPlaying) {
       t.isPlaying = false;
+      t.djPeerId = null;
+      t.djNickname = null;
       world.updateTableTurntableVisual(t.id);
     }
   });
 
   tableData.currentLP = lp;
   tableData.rpm = lp.rpm || 33;
+  tableData.djPeerId = mp ? mp.peerId : 'local';
+  tableData.djNickname = getLocalNickname();
 
   // Clear held LP from character's hands since it's now on the turntable!
   if (state.heldLP && state.heldLP.id === lp.id) {
@@ -1799,15 +1902,32 @@ function startTableTurntable(tableData, withNeedleDrop = true, isRemoteSync = fa
   state.tables.forEach((t) => {
     if (t.id !== tableData.id && t.isPlaying) {
       t.isPlaying = false;
+      t.djPeerId = null;
+      t.djNickname = null;
       world.updateTableTurntableVisual(t.id);
     }
   });
 
   tableData.isPlaying = true;
-  state.playingTableId = tableData.id;
+  if (!isRemoteSync && !tableData.djPeerId) {
+    tableData.djPeerId = mp ? mp.peerId : 'local';
+    tableData.djNickname = getLocalNickname();
+  }
 
   world.updateTableTurntableVisual(tableData.id);
-  audio.startTurntableLP(tableData.currentLP, tableData.rpm, withNeedleDrop);
+
+  // Audio rule: ONLY play audio if the local user is actually seated at this table!
+  const isLocalUserSeatedHere = state.seatedTable?.id === tableData.id;
+  if (isLocalUserSeatedHere) {
+    state.playingTableId = tableData.id;
+    audio.startTurntableLP(tableData.currentLP, tableData.rpm, withNeedleDrop);
+  } else {
+    // If not seated at this table, do NOT play table audio locally
+    if (state.playingTableId === tableData.id) {
+      audio.stopTurntable(false);
+      state.playingTableId = null;
+    }
+  }
 
   if (!isRemoteSync && mp) {
     mp.broadcastTableUpdate(tableData, 'play');
@@ -1819,8 +1939,16 @@ function startTableTurntable(tableData, withNeedleDrop = true, isRemoteSync = fa
 
 function stopTableTurntable(tableData, isRemoteSync = false) {
   tableData.isPlaying = false;
+  // DJ lock is released when paused
+  tableData.djPeerId = null;
+  tableData.djNickname = null;
+
   world.updateTableTurntableVisual(tableData.id);
-  audio.stopTurntable(true);
+
+  if (state.playingTableId === tableData.id || state.seatedTable?.id === tableData.id) {
+    audio.stopTurntable(true);
+    state.playingTableId = null;
+  }
 
   if (!isRemoteSync && mp) {
     mp.broadcastTableUpdate(tableData, 'pause');
@@ -1872,14 +2000,24 @@ function refreshTableHUD() {
     emptyDisc.classList.add('hidden');
     platterEl.classList.toggle('spinning', table.isPlaying);
 
-    stateLabel.textContent = table.isPlaying
-      ? `🎵 턴테이블 회전 중 (${table.rpm} RPM · 치지직 ON)`
-      : '⏸ 턴테이블에 LP 올려짐 (대기 중)';
-    titleEl.textContent = table.currentLP.title;
-    artistEl.textContent = `${table.currentLP.artist} · ${table.currentLP.year}`;
-    needleLabel.textContent = table.isPlaying
-      ? '🪡 톤암(바늘) 들어올리기 · 일시정지'
-      : '🪡 톤암(바늘) 내려놓기 · 재생';
+    const canModify = canModifyTableTurntable(table);
+    if (!canModify) {
+      stateLabel.textContent = `🔒 [${table.djNickname || '다른 손님'}]님이 재생 중 (${table.rpm} RPM · 변경 잠금)`;
+      titleEl.textContent = table.currentLP.title;
+      artistEl.textContent = `${table.currentLP.artist} · ${table.currentLP.year}`;
+      needleLabel.textContent = `🔒 [${table.djNickname || '다른 손님'}]님 재생 중 (일시정지/퇴장 시 변경 가능)`;
+      if (btnPutHeld) btnPutHeld.style.opacity = '0.5';
+    } else {
+      if (btnPutHeld) btnPutHeld.style.opacity = '1';
+      stateLabel.textContent = table.isPlaying
+        ? `🎵 턴테이블 회전 중 (${table.rpm} RPM · 치지직 ON)`
+        : '⏸ 턴테이블에 LP 올려짐 (대기 중)';
+      titleEl.textContent = table.currentLP.title;
+      artistEl.textContent = `${table.currentLP.artist} · ${table.currentLP.year}`;
+      needleLabel.textContent = table.isPlaying
+        ? '🪡 톤암(바늘) 들어올리기 · 일시정지'
+        : '🪡 톤암(바늘) 내려놓기 · 재생';
+    }
 
     // Show user story box if this LP came from the User Story LP Corner
     if (table.currentLP.isUserRecommendation || table.currentLP.scene) {
@@ -1903,6 +2041,7 @@ function refreshTableHUD() {
     emptyDisc.classList.remove('hidden');
     platterEl.classList.remove('spinning');
     storyBox.classList.add('hidden');
+    if (btnPutHeld) btnPutHeld.style.opacity = '1';
 
     stateLabel.textContent = '턴테이블 비어 있음';
     titleEl.textContent = '올려진 LP판이 없습니다';
@@ -1914,11 +2053,67 @@ function refreshTableHUD() {
   document.getElementById('btn-rpm-45').classList.toggle('active', table.rpm === 45);
 }
 
-function closeTableTurntableHUD(tellWorld = true) {
+function handleCharacterLeftTable(table) {
+  if (!table) return;
+
+  // 1. Audio for this table immediately stops because the user is no longer seated!
+  if (state.playingTableId === table.id) {
+    audio.stopTurntable(true);
+    state.playingTableId = null;
+  }
+
+  // 2. DJ status handling
+  const myPeerId = mp?.peerId || 'local';
+  const wasDJ = table.djPeerId === myPeerId;
+  const othersSeated = getSeatedPeersCount(table.id);
+
+  if (wasDJ) {
+    table.djPeerId = null;
+    table.djNickname = null;
+
+    if (othersSeated > 0) {
+      // Others are still seated: song keeps playing for them, DJ lock is released!
+      if (mp) mp.broadcastTableUpdate(table, 'dj-leave');
+    } else {
+      // Table is now empty: stop the turntable
+      table.isPlaying = false;
+      world.updateTableTurntableVisual(table.id);
+      if (mp) mp.broadcastTableUpdate(table, 'pause');
+    }
+  } else if (othersSeated === 0 && table.isPlaying) {
+    table.isPlaying = false;
+    table.djPeerId = null;
+    table.djNickname = null;
+    world.updateTableTurntableVisual(table.id);
+    if (mp) mp.broadcastTableUpdate(table, 'pause');
+  }
+
+  refreshNowPlayingBar();
+}
+
+function handleWorldLeftTable(tableId) {
+  const table = state.tables.find((t) => t.id === tableId) || state.seatedTable;
   state.seatedTable = null;
   document.getElementById('table-turntable-hud').classList.add('hidden');
   const mobileLeaveBtn = document.getElementById('btn-mobile-leave');
   if (mobileLeaveBtn) mobileLeaveBtn.classList.add('hidden');
+
+  if (table) {
+    handleCharacterLeftTable(table);
+  }
+}
+
+function closeTableTurntableHUD(tellWorld = true) {
+  const prevTable = state.seatedTable;
+  state.seatedTable = null;
+  document.getElementById('table-turntable-hud').classList.add('hidden');
+  const mobileLeaveBtn = document.getElementById('btn-mobile-leave');
+  if (mobileLeaveBtn) mobileLeaveBtn.classList.add('hidden');
+
+  if (prevTable) {
+    handleCharacterLeftTable(prevTable);
+  }
+
   if (tellWorld) {
     world.leaveTable();
     highlightZoneButton('walk');
@@ -1931,8 +2126,12 @@ function closeTableTurntableHUD(tellWorld = true) {
 // =========================================================================
 function setupNowPlayingBar() {
   document.getElementById('btn-np-toggle').addEventListener('click', () => {
-    const activeTable = state.tables.find((t) => t.id === state.playingTableId);
-    if (activeTable && activeTable.currentLP) {
+    if (state.seatedTable) {
+      const activeTable = state.seatedTable;
+      if (!canModifyTableTurntable(activeTable)) {
+        showToast(`⚠️ 현재 [${activeTable.djNickname || '다른 손님'}]님이 재생 중입니다. 먼저 곡을 튼 분이 일시정지하거나 자리를 비우기 전에는 변경할 수 없습니다.`);
+        return;
+      }
       if (activeTable.isPlaying) {
         stopTableTurntable(activeTable);
       } else {
@@ -1941,33 +2140,47 @@ function setupNowPlayingBar() {
       return;
     }
 
-    if (state.userCornerActiveLP) {
+    if (state.userCornerActiveLP && state.openUserCorner) {
       if (state.userCornerPlaying) {
         stopUserCornerPlayback();
       } else {
         startUserCornerPlayback(state.userCornerActiveLP, true);
       }
+      return;
     }
+
+    showToast('🎧 음악을 제어하려면 해당 테이블에 착석해야 합니다.');
   });
 
   document.getElementById('btn-np-needle-drop').addEventListener('click', () => {
-    const activeTable = state.tables.find((t) => t.id === state.playingTableId);
-    if (activeTable && activeTable.currentLP) {
-      startTableTurntable(activeTable, true);
-      showToast('🪡 바늘을 LP 첫 트랙에 다시 내려놓았습니다 (툭— 치지직...)');
-      return;
+    if (state.seatedTable) {
+      const activeTable = state.seatedTable;
+      if (!canModifyTableTurntable(activeTable)) {
+        showToast(`⚠️ 현재 [${activeTable.djNickname || '다른 손님'}]님이 재생 중입니다.`);
+        return;
+      }
+      if (activeTable.currentLP) {
+        startTableTurntable(activeTable, true);
+        showToast('🪡 바늘을 LP 첫 트랙에 다시 내려놓았습니다 (툭— 치지직...)');
+        return;
+      }
     }
-    if (state.userCornerActiveLP) {
+    if (state.userCornerActiveLP && state.openUserCorner) {
       startUserCornerPlayback(state.userCornerActiveLP, true);
       showToast('🪡 바늘을 사연 LP 첫 트랙에 다시 내려놓았습니다 (툭— 치지직...)');
     }
   });
 
   document.getElementById('btn-np-goto-table').addEventListener('click', () => {
-    if (state.playingTableId) {
+    if (state.seatedTable) {
+      showToast('🪑 이미 해당 테이블에 착석해 있습니다.');
+      return;
+    }
+    const playingTable = state.tables.find((t) => t.isPlaying && t.currentLP) || state.tables.find((t) => t.id === state.playingTableId);
+    if (playingTable) {
       closeShelfDiggingUI(false);
       closeUserCornerUI(false);
-      world.sitAtTable(state.playingTableId);
+      world.sitAtTable(playingTable.id);
     } else if (state.userCornerActiveLP) {
       closeShelfDiggingUI(false);
       closeTableTurntableHUD(false);
@@ -1988,41 +2201,77 @@ function setupNowPlayingBar() {
 function refreshNowPlayingBar() {
   const bar = document.getElementById('now-playing-bar');
   const topIcon = document.getElementById('top-vinyl-icon');
-  const activeTable = state.tables.find((t) => t.id === state.playingTableId);
+  const btnToggle = document.getElementById('btn-np-toggle');
+  const btnGoto = document.getElementById('btn-np-goto-table');
 
-  if (activeTable && activeTable.currentLP) {
+  // Case 1: Local player is seated at a table with an LP
+  if (state.seatedTable && state.seatedTable.currentLP) {
+    const table = state.seatedTable;
     bar.classList.remove('hidden');
-    topIcon.classList.toggle('playing', activeTable.isPlaying);
+    topIcon.classList.toggle('playing', table.isPlaying);
 
     const disc = document.getElementById('np-spinning-disc');
-    disc.classList.toggle('paused', !activeTable.isPlaying);
+    disc.classList.toggle('paused', !table.isPlaying);
 
-    applyLPCoverImage(document.getElementById('np-cover-img'), activeTable.currentLP);
-    document.getElementById('np-table-tag').textContent = `${activeTable.capacity}인석 ${activeTable.code} 턴테이블`;
-    document.getElementById('np-title').textContent = activeTable.currentLP.title;
-    document.getElementById('np-artist').textContent = activeTable.currentLP.artist;
-    document.getElementById('btn-np-toggle').textContent = activeTable.isPlaying ? '⏸ 일시정지' : '▶ 다시 재생';
-    document.getElementById('btn-np-goto-table').textContent = '🪑 해당 테이블 보기';
+    applyLPCoverImage(document.getElementById('np-cover-img'), table.currentLP);
+    const djTag = table.djNickname ? ` · DJ: ${table.djNickname}` : '';
+    document.getElementById('np-table-tag').textContent = `${table.capacity}인석 ${table.code} 턴테이블 (착석 청음 중)${djTag}`;
+    document.getElementById('np-title').textContent = table.currentLP.title;
+    document.getElementById('np-artist').textContent = table.currentLP.artist;
+
+    const canModify = canModifyTableTurntable(table);
+    if (!canModify) {
+      btnToggle.textContent = '🔒 재생 중 (잠금)';
+      btnToggle.disabled = true;
+    } else {
+      btnToggle.disabled = false;
+      btnToggle.textContent = table.isPlaying ? '⏸ 일시정지' : '▶ 다시 재생';
+    }
+    btnGoto.textContent = '🪑 현재 테이블';
     return;
   }
 
-  if (state.userCornerActiveLP) {
+  // Case 2: User Corner 1st-person listening station
+  if (state.userCornerPlaying && state.userCornerActiveLP) {
     bar.classList.remove('hidden');
-    topIcon.classList.toggle('playing', state.userCornerPlaying);
+    topIcon.classList.toggle('playing', true);
 
     const disc = document.getElementById('np-spinning-disc');
-    disc.classList.toggle('paused', !state.userCornerPlaying);
+    disc.classList.toggle('paused', false);
 
     applyLPCoverImage(document.getElementById('np-cover-img'), state.userCornerActiveLP);
     const recName = state.userCornerActiveLP.recommender?.name || '익명 디거';
     document.getElementById('np-table-tag').textContent = `💌 유저 사연 코너 · ${recName}님의 추천 LP`;
     document.getElementById('np-title').textContent = state.userCornerActiveLP.title;
     document.getElementById('np-artist').textContent = state.userCornerActiveLP.artist;
-    document.getElementById('btn-np-toggle').textContent = state.userCornerPlaying ? '⏸ 일시정지' : '▶ 다시 재생';
-    document.getElementById('btn-np-goto-table').textContent = '💌 1인칭 사연 코너 보기';
+    btnToggle.disabled = false;
+    btnToggle.textContent = '⏸ 일시정지';
+    btnGoto.textContent = '💌 1인칭 사연 코너';
     return;
   }
 
+  // Case 3: Walking around in lounge, but some table in the bar is playing!
+  // Audio is silent for the walking player; bar invites user to walk over and sit down to listen!
+  const playingTable = state.tables.find((t) => t.isPlaying && t.currentLP);
+  if (playingTable) {
+    bar.classList.remove('hidden');
+    topIcon.classList.remove('playing');
+
+    const disc = document.getElementById('np-spinning-disc');
+    disc.classList.add('paused');
+
+    applyLPCoverImage(document.getElementById('np-cover-img'), playingTable.currentLP);
+    const djTag = playingTable.djNickname ? ` · DJ: ${playingTable.djNickname}` : '';
+    document.getElementById('np-table-tag').textContent = `🎵 ${playingTable.name} 재생 중 (착석 시 청음)${djTag}`;
+    document.getElementById('np-title').textContent = playingTable.currentLP.title;
+    document.getElementById('np-artist').textContent = playingTable.currentLP.artist;
+    btnToggle.disabled = true;
+    btnToggle.textContent = '🎧 착석 시 들림';
+    btnGoto.textContent = '🪑 해당 테이블로 가기';
+    return;
+  }
+
+  // Case 4: No playback anywhere
   bar.classList.add('hidden');
   topIcon.classList.remove('playing');
 }
@@ -2321,6 +2570,21 @@ function setupMultiplayerSync() {
       seenPeerStatus.delete(peerId);
       if (world) world.removeRemotePeer(peerId);
       appendChatMessage({ sender: 'system', text: `🚪 [${peerData?.nickname || '디거'}]님이 퇴장했습니다.` });
+
+      // If this peer was the DJ of any table, clear their DJ lock
+      state.tables.forEach((t) => {
+        if (t.djPeerId === peerId) {
+          t.djPeerId = null;
+          t.djNickname = null;
+          // If no one is seated at this table anymore, stop the turntable
+          if (getSeatedPeersCount(t.id) === 0 && state.seatedTable?.id !== t.id && t.isPlaying) {
+            t.isPlaying = false;
+            if (world) world.updateTableTurntableVisual(t.id);
+          }
+        }
+      });
+      if (state.seatedTable) refreshTableHUD();
+      refreshNowPlayingBar();
     },
 
     // 3. Online count
@@ -2343,16 +2607,22 @@ function setupMultiplayerSync() {
       const table = state.tables.find((t) => t.id === payload.tableId);
       if (!table) return;
 
-      const wasMyAudio = state.playingTableId === table.id;
-      const iAmSeatedHere = state.seatedTable?.id === table.id;
-
       table.currentLP = resolveLPReference(payload.currentLP);
       table.rpm = payload.rpm === 45 ? 45 : 33;
       table.isPlaying = Boolean(payload.isPlaying) && Boolean(table.currentLP);
+      if (payload.djPeerId !== undefined) {
+        table.djPeerId = payload.djPeerId;
+      }
+      if (payload.djNickname !== undefined) {
+        table.djNickname = payload.djNickname;
+      }
+
       if (world) world.updateTableTurntableVisual(table.id);
 
-      // Audio only follows remote changes for the table I'm sitting at / listening to
-      if (iAmSeatedHere || wasMyAudio) {
+      // Audio rule: The song playing at a table is ONLY heard when seated at that table!
+      const iAmSeatedHere = state.seatedTable?.id === table.id;
+
+      if (iAmSeatedHere) {
         if (table.isPlaying) {
           if (state.userCornerPlaying) {
             state.userCornerPlaying = false;
@@ -2362,9 +2632,17 @@ function setupMultiplayerSync() {
           audio.startTurntableLP(table.currentLP, table.rpm, true);
         } else {
           audio.stopTurntable(true);
+          state.playingTableId = null;
         }
         refreshTableHUD();
         refreshNowPlayingBar();
+      } else {
+        // I am NOT seated at this table: ensure my local audio is silent!
+        if (state.playingTableId === table.id) {
+          audio.stopTurntable(true);
+          state.playingTableId = null;
+          refreshNowPlayingBar();
+        }
       }
 
       if (payload.actionType === 'play' && table.currentLP) {
@@ -2443,7 +2721,9 @@ function setupMultiplayerSync() {
           id: t.id,
           currentLP: t.currentLP,
           isPlaying: Boolean(t.isPlaying),
-          rpm: t.rpm
+          rpm: t.rpm,
+          djPeerId: t.djPeerId || null,
+          djNickname: t.djNickname || null
         })),
         coasters: state.coasters.slice(0, 15),
         moodIndex: world ? world.moodIndex : 0
@@ -2459,6 +2739,8 @@ function setupMultiplayerSync() {
             localT.currentLP = resolveLPReference(st.currentLP);
             localT.isPlaying = Boolean(st.isPlaying);
             localT.rpm = st.rpm === 45 ? 45 : 33;
+            localT.djPeerId = st.djPeerId || null;
+            localT.djNickname = st.djNickname || null;
             if (world) world.updateTableTurntableVisual(localT.id);
           }
         });

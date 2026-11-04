@@ -236,6 +236,8 @@ export class MultiplayerSync {
       isPlaying: Boolean(tableData.isPlaying),
       rpm: tableData.rpm || 33,
       currentLP: tableData.currentLP || null,
+      djPeerId: tableData.djPeerId || null,
+      djNickname: tableData.djNickname || null,
       ts: Date.now()
     });
   }
