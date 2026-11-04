@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <title>MIDNIGHT GROOVE — 3D 온라인 LP바</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -838,6 +838,45 @@
       </form>
     </div>
   </aside>
+
+  <!-- ==============================================================
+       MOBILE TOUCH CONTROLS (Virtual Joystick & Floating Action Group)
+       ============================================================== -->
+  <div id="mobile-controls-layer" class="mobile-controls-layer hidden">
+    <!-- Virtual Joystick (Bottom Left) -->
+    <div id="virtual-joystick" class="virtual-joystick" title="드래그하여 이동">
+      <div class="joystick-base" id="joystick-base">
+        <div class="joystick-knob" id="joystick-knob"></div>
+      </div>
+      <span class="joystick-label">터치 이동</span>
+    </div>
+
+    <!-- Mobile Action Buttons (Bottom Right) -->
+    <div class="mobile-actions-group" id="mobile-actions-group">
+      <!-- Contextual Interaction Button (appears when near shelf, table, user corner) -->
+      <button type="button" id="btn-mobile-interact" class="btn-mobile-action btn-mobile-interact hidden">
+        <span class="mobile-act-icon" id="mobile-act-icon">✨</span>
+        <span class="mobile-act-text" id="mobile-act-text">상호작용</span>
+      </button>
+
+      <!-- Leave Table Button (when seated) -->
+      <button type="button" id="btn-mobile-leave" class="btn-mobile-action btn-mobile-leave hidden" title="테이블에서 일어서기">
+        <span class="mobile-act-icon">🪑</span>
+        <span class="mobile-act-text">일어서기</span>
+      </button>
+
+      <!-- Drop Held LP Button (when holding LP) -->
+      <button type="button" id="btn-mobile-drop-lp" class="btn-mobile-action btn-mobile-drop-lp hidden" title="들고 있는 LP 내려놓기">
+        <span class="mobile-act-icon">✕</span>
+        <span class="mobile-act-text">LP 놓기</span>
+      </button>
+
+      <!-- Camera Front Reset Button -->
+      <button type="button" id="btn-mobile-cam-reset" class="btn-mobile-sub-action" title="시점 정면 정렬">
+        <span>🔄 정면 시점</span>
+      </button>
+    </div>
+  </div>
 
   <!-- Toast Notification -->
   <div id="toast-container" class="toast-container"></div>

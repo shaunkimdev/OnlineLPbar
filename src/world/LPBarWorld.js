@@ -60,6 +60,9 @@ export class LPBarWorld {
     this.localChatText = '';
     this.localChatExpiresAt = 0;
 
+    // Mobile & Touch controls
+    this.joystickVector = new THREE.Vector2(0, 0);
+
     // Multiplayer remote peers registry: peerId -> { group, rig, gender, labelSprite, currentPos, targetPos, currentRotY, targetRotY, isMoving, isSeated, seatedTableId, seatIndex, heldLPId, nickname, chatText, chatExpiresAt }
     this.remotePlayers = new Map();
 
@@ -1827,6 +1830,18 @@ export class LPBarWorld {
     }
   }
 
+  setJoystickVector(x, y) {
+    this.joystickVector.set(x, y);
+    if (this.joystickVector.lengthSq() > 0.001) {
+      this.walkTarget = null;
+      this.walkTargetCallback = null;
+    }
+  }
+
+  resetCameraOrbit() {
+    this.cameraOrbitAngle = 0;
+  }
+
   // =========================================================================
   // 8. INPUT EVENTS (Keyboard WASD/Arrows, Mouse Click-to-Walk/Interact, Orbit)
   // =========================================================================
@@ -1924,12 +1939,90 @@ export class LPBarWorld {
       },
       { passive: true }
     );
+
+    // Touch interaction for Mobile:
+    // 1-finger drag on canvas orbits camera; tap walks or interacts; 2-finger pinch zooms
+    let touchStartX = 0;
+    let touchStartY = 0;
+    let touchStartTime = 0;
+    let isTouchDragging = false;
+    let lastTouchX = 0;
+    let initialPinchDist = null;
+    let initialZoomDist = 0;
+
+    this.renderer.domElement.addEventListener(
+      'touchstart',
+      (e) => {
+        if (document.activeElement && !this._isTypingInTextField() && document.activeElement !== document.body) {
+          document.activeElement.blur?.();
+        }
+        if (e.touches.length === 1) {
+          const t = e.touches[0];
+          touchStartX = t.clientX;
+          touchStartY = t.clientY;
+          lastTouchX = t.clientX;
+          touchStartTime = performance.now();
+          isTouchDragging = false;
+        } else if (e.touches.length === 2) {
+          const dx = e.touches[0].clientX - e.touches[1].clientX;
+          const dy = e.touches[0].clientY - e.touches[1].clientY;
+          initialPinchDist = Math.hypot(dx, dy);
+          initialZoomDist = this.cameraZoomDist;
+        }
+      },
+      { passive: true }
+    );
+
+    this.renderer.domElement.addEventListener(
+      'touchmove',
+      (e) => {
+        if (e.touches.length === 1) {
+          const t = e.touches[0];
+          const distFromStart = Math.hypot(t.clientX - touchStartX, t.clientY - touchStartY);
+          if (distFromStart > 12) {
+            isTouchDragging = true;
+          }
+          if (isTouchDragging && this.cameraMode === 'walk') {
+            const dx = t.clientX - lastTouchX;
+            this.cameraOrbitAngle -= dx * 0.007;
+          }
+          lastTouchX = t.clientX;
+        } else if (e.touches.length === 2 && initialPinchDist) {
+          const dx = e.touches[0].clientX - e.touches[1].clientX;
+          const dy = e.touches[0].clientY - e.touches[1].clientY;
+          const currentDist = Math.hypot(dx, dy);
+          const ratio = currentDist / Math.max(10, initialPinchDist);
+          this.cameraZoomDist = Math.max(4.2, Math.min(13.5, initialZoomDist / ratio));
+        }
+      },
+      { passive: true }
+    );
+
+    this.renderer.domElement.addEventListener(
+      'touchend',
+      (e) => {
+        if (!isTouchDragging && performance.now() - touchStartTime < 350 && e.changedTouches.length === 1) {
+          const t = e.changedTouches[0];
+          if (this.cameraMode === 'walk' && !this.isSeated) {
+            this._handleCanvasTap(t.clientX, t.clientY);
+          }
+        }
+        if (e.touches.length < 2) {
+          initialPinchDist = null;
+        }
+      },
+      { passive: true }
+    );
   }
 
   _handleCanvasClick(e) {
+    this._handleCanvasTap(e.clientX, e.clientY);
+  }
+
+  _handleCanvasTap(clientX, clientY) {
     const rect = this.renderer.domElement.getBoundingClientRect();
-    this.mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-    this.mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+    this.mouse.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+    this.mouse.y = -((clientY - rect.top) / rect.height) * 2 + 1;
 
     this.raycaster.setFromCamera(this.mouse, this.camera);
 
@@ -2037,6 +2130,16 @@ export class LPBarWorld {
 
       this.charPos.x += moveVec.x * speed * dt;
       this.charPos.z += moveVec.z * speed * dt;
+      this.charRotY = Math.atan2(moveVec.x, moveVec.z);
+    } else if (this.joystickVector && this.joystickVector.lengthSq() > 0.001) {
+      isMoving = true;
+      const moveVec = new THREE.Vector3(this.joystickVector.x, 0, this.joystickVector.y);
+      const joyLen = Math.min(1.0, moveVec.length());
+      moveVec.normalize();
+      moveVec.applyAxisAngle(new THREE.Vector3(0, 1, 0), this.cameraOrbitAngle);
+
+      this.charPos.x += moveVec.x * speed * joyLen * dt;
+      this.charPos.z += moveVec.z * speed * joyLen * dt;
       this.charRotY = Math.atan2(moveVec.x, moveVec.z);
     } else if (this.walkTarget) {
       const diff = new THREE.Vector3().subVectors(this.walkTarget, this.charPos);

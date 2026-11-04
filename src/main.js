@@ -131,7 +131,8 @@ window.addEventListener('DOMContentLoaded', () => {
     setupAmbientDrawer,
     setupCoasterGuestbook,
     setupCustomLPModal,
-    setupGlobalHotkeys
+    setupGlobalHotkeys,
+    setupMobileControls
   ];
   setupSteps.forEach((step) => {
     try {
@@ -337,6 +338,11 @@ function setHeldLP(lp) {
   } else {
     pill.classList.add('hidden');
   }
+
+  const mobileDropBtn = document.getElementById('btn-mobile-drop-lp');
+  if (mobileDropBtn) {
+    mobileDropBtn.classList.toggle('hidden', !lp);
+  }
 }
 
 function setLocationStatus(text) {
@@ -349,12 +355,21 @@ function setLocationStatus(text) {
 // =========================================================================
 function updateProximityPrompt(prox) {
   const promptEl = document.getElementById('proximity-prompt');
+  const mobileActBtn = document.getElementById('btn-mobile-interact');
+  const mobileActIcon = document.getElementById('mobile-act-icon');
+  const mobileActText = document.getElementById('mobile-act-text');
+
   if (!prox) {
     promptEl.classList.add('hidden');
+    if (mobileActBtn) mobileActBtn.classList.add('hidden');
     return;
   }
 
   promptEl.classList.remove('hidden');
+  if (mobileActBtn && !state.seatedTable) {
+    mobileActBtn.classList.remove('hidden');
+  }
+
   const badgeEl = document.getElementById('proximity-type');
   const titleEl = document.getElementById('proximity-title');
   const subEl = document.getElementById('proximity-sub');
@@ -367,24 +382,34 @@ function updateProximityPrompt(prox) {
     subEl.textContent = `유저들이 직접 남긴 사연과 인생곡 ${state.userSongs.length}장이 꽂혀 있습니다. 1인칭 시점으로 사연을 읽으며 바로 들어보세요.`;
     btnLabel.textContent = '1인칭 사연 감상 & 청음 화면으로 전환';
     btnAction.onclick = () => world.enterUserCornerCloseup();
+    if (mobileActIcon) mobileActIcon.textContent = '💌';
+    if (mobileActText) mobileActText.textContent = '사연 코너';
   } else if (prox.type === 'shelf') {
     badgeEl.textContent = `${prox.data.code} · POPULAR VINYL RACK`;
     titleEl.textContent = `${prox.data.name} (${prox.data.koName})`;
     subEl.textContent = prox.data.subtitle;
     btnLabel.textContent = '책장 정면 클로즈업으로 LP 둘러보기';
     btnAction.onclick = () => world.enterShelfCloseup(prox.id);
+    if (mobileActIcon) mobileActIcon.textContent = '📚';
+    if (mobileActText) mobileActText.textContent = '책장 디깅';
   } else if (prox.type === 'table') {
     badgeEl.textContent = prox.data.typeLabel;
     titleEl.textContent = prox.data.name;
     if (state.heldLP) {
       subEl.textContent = `손에 든 [${state.heldLP.title}] LP를 이 테이블의 턴테이블에 올립니다`;
       btnLabel.textContent = '테이블에 앉아서 LP판 올리고 재생하기';
+      if (mobileActIcon) mobileActIcon.textContent = '💿';
+      if (mobileActText) mobileActText.textContent = 'LP 올리기';
     } else if (prox.data.currentLP) {
       subEl.textContent = `현재 올려진 LP: ${prox.data.currentLP.title} (${prox.data.currentLP.artist})`;
       btnLabel.textContent = '테이블에 앉아서 턴테이블 조작하기';
+      if (mobileActIcon) mobileActIcon.textContent = '🛋️';
+      if (mobileActText) mobileActText.textContent = '테이블 착석';
     } else {
       subEl.textContent = prox.data.desc;
       btnLabel.textContent = '이 테이블에 앉기';
+      if (mobileActIcon) mobileActIcon.textContent = '🛋️';
+      if (mobileActText) mobileActText.textContent = '테이블 착석';
     }
     btnAction.onclick = () => world.sitAtTable(prox.id);
   }
@@ -420,7 +445,7 @@ function setupShelfDiggingUI() {
     flipShelfLP(1);
   });
 
-  // Mouse wheel inside the crate viewport flips records!
+  // Mouse wheel & Touch swipe inside the crate viewport flips records!
   const viewport = document.getElementById('lp-crate-viewport');
   viewport.addEventListener(
     'wheel',
@@ -431,6 +456,23 @@ function setupShelfDiggingUI() {
     },
     { passive: false }
   );
+
+  let vpTouchStartX = 0;
+  viewport.addEventListener('touchstart', (e) => {
+    if (e.touches.length === 1) {
+      vpTouchStartX = e.touches[0].clientX;
+    }
+  }, { passive: true });
+
+  viewport.addEventListener('touchend', (e) => {
+    if (e.changedTouches.length === 1) {
+      const dx = e.changedTouches[0].clientX - vpTouchStartX;
+      if (Math.abs(dx) > 35) {
+        if (dx < 0) flipShelfLP(1);
+        else flipShelfLP(-1);
+      }
+    }
+  }, { passive: true });
 
   // Random Digging Button ("추천곡들을 랜덤하게 넘겨볼수있고")
   document.getElementById('btn-random-lp').addEventListener('click', () => {
@@ -454,10 +496,11 @@ function openShelfDiggingUI(shelfData) {
   state.openShelf = shelfData;
   state.selectedLPIndex = 0;
 
-  // Hide user corner & table HUD if open
+  // Hide user corner & table HUD & mobile joystick if open
   closeUserCornerUI(false);
   document.getElementById('table-turntable-hud').classList.add('hidden');
   document.getElementById('proximity-prompt').classList.add('hidden');
+  document.getElementById('mobile-controls-layer')?.classList.add('hidden');
 
   const overlay = document.getElementById('shelf-closeup-overlay');
   overlay.classList.remove('hidden');
@@ -481,6 +524,9 @@ function openShelfDiggingUI(shelfData) {
 function closeShelfDiggingUI(tellWorld = true) {
   state.openShelf = null;
   document.getElementById('shelf-closeup-overlay').classList.add('hidden');
+  if (detectMobileDevice()) {
+    document.getElementById('mobile-controls-layer')?.classList.remove('hidden');
+  }
   if (tellWorld) {
     world.exitShelfCloseup();
     highlightZoneButton('walk');
@@ -699,7 +745,7 @@ function setupUserCornerUI() {
     flipUserCornerLP(1);
   });
 
-  // Mouse wheel inside User Corner crate flips records
+  // Mouse wheel & touch swipe inside User Corner crate flips records
   const ucViewport = document.getElementById('uc-crate-viewport');
   ucViewport.addEventListener(
     'wheel',
@@ -710,6 +756,23 @@ function setupUserCornerUI() {
     },
     { passive: false }
   );
+
+  let ucTouchStartX = 0;
+  ucViewport.addEventListener('touchstart', (e) => {
+    if (e.touches.length === 1) {
+      ucTouchStartX = e.touches[0].clientX;
+    }
+  }, { passive: true });
+
+  ucViewport.addEventListener('touchend', (e) => {
+    if (e.changedTouches.length === 1) {
+      const dx = e.changedTouches[0].clientX - ucTouchStartX;
+      if (Math.abs(dx) > 35) {
+        if (dx < 0) flipUserCornerLP(1);
+        else flipUserCornerLP(-1);
+      }
+    }
+  }, { passive: true });
 
   // 1st-Person Listening Controls
   document.getElementById('btn-uc-play-toggle').addEventListener('click', () => {
@@ -801,10 +864,11 @@ function filterUserSongsByMood(moodKey) {
 function openUserCornerUI(targetSongId = null) {
   state.openUserCorner = true;
 
-  // Hide shelf or table HUD if open
+  // Hide shelf or table HUD & mobile joystick if open
   closeShelfDiggingUI(false);
   document.getElementById('table-turntable-hud').classList.add('hidden');
   document.getElementById('proximity-prompt').classList.add('hidden');
+  document.getElementById('mobile-controls-layer')?.classList.add('hidden');
 
   if (targetSongId) {
     state.activeMoodFilter = 'all';
@@ -831,6 +895,9 @@ function closeUserCornerUI(tellWorld = true) {
   if (!state.openUserCorner) return;
   state.openUserCorner = false;
   document.getElementById('user-corner-overlay').classList.add('hidden');
+  if (detectMobileDevice()) {
+    document.getElementById('mobile-controls-layer')?.classList.remove('hidden');
+  }
 
   if (tellWorld) {
     world.exitUserCornerCloseup();
@@ -1675,6 +1742,11 @@ function handleCharacterSatAtTable(tableData) {
   document.getElementById('proximity-prompt').classList.add('hidden');
   document.getElementById('table-turntable-hud').classList.remove('hidden');
 
+  const mobileLeaveBtn = document.getElementById('btn-mobile-leave');
+  if (mobileLeaveBtn) mobileLeaveBtn.classList.remove('hidden');
+  const mobileActBtn = document.getElementById('btn-mobile-interact');
+  if (mobileActBtn) mobileActBtn.classList.add('hidden');
+
   setLocationStatus(`${tableData.name} 착석 중`);
 
   // If the character walked to this table holding an LP in their hands,
@@ -1845,6 +1917,8 @@ function refreshTableHUD() {
 function closeTableTurntableHUD(tellWorld = true) {
   state.seatedTable = null;
   document.getElementById('table-turntable-hud').classList.add('hidden');
+  const mobileLeaveBtn = document.getElementById('btn-mobile-leave');
+  if (mobileLeaveBtn) mobileLeaveBtn.classList.add('hidden');
   if (tellWorld) {
     world.leaveTable();
     highlightZoneButton('walk');
@@ -2684,4 +2758,153 @@ function setupGlobalHotkeys() {
       }
     }
   });
+}
+
+// =========================================================================
+// 11. MOBILE DETECTION & SCREEN TOUCH CONTROLS (Joystick, Gestures, Actions)
+// =========================================================================
+function detectMobileDevice() {
+  const uaMatch = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+  const touchMatch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+  const narrowScreen = window.innerWidth <= 1024;
+  return uaMatch || (touchMatch && narrowScreen);
+}
+
+function setupMobileControls() {
+  const isMobile = detectMobileDevice();
+  const layer = document.getElementById('mobile-controls-layer');
+  if (isMobile) {
+    document.body.classList.add('is-mobile');
+    if (layer && !state.openShelf && !state.openUserCorner) {
+      layer.classList.remove('hidden');
+    }
+  }
+
+  window.addEventListener('resize', () => {
+    const nowMobile = detectMobileDevice();
+    document.body.classList.toggle('is-mobile', nowMobile);
+    if (layer) {
+      if (nowMobile && !state.openShelf && !state.openUserCorner) {
+        layer.classList.remove('hidden');
+      } else if (!nowMobile) {
+        layer.classList.add('hidden');
+      }
+    }
+  });
+
+  // Virtual Joystick touch tracking
+  const joystick = document.getElementById('virtual-joystick');
+  const base = document.getElementById('joystick-base');
+  const knob = document.getElementById('joystick-knob');
+
+  if (joystick && knob) {
+    let activeTouchId = null;
+    let baseCenter = { x: 0, y: 0 };
+    const maxRadius = 40; // px
+
+    joystick.addEventListener(
+      'touchstart',
+      (e) => {
+        e.preventDefault();
+        if (activeTouchId !== null) return;
+        const t = e.changedTouches[0];
+        activeTouchId = t.identifier;
+
+        const rect = (base || joystick).getBoundingClientRect();
+        baseCenter = {
+          x: rect.left + rect.width / 2,
+          y: rect.top + rect.height / 2
+        };
+
+        updateJoystick(t.clientX, t.clientY);
+      },
+      { passive: false }
+    );
+
+    const onTouchMove = (e) => {
+      if (activeTouchId === null) return;
+      for (let i = 0; i < e.changedTouches.length; i++) {
+        const t = e.changedTouches[i];
+        if (t.identifier === activeTouchId) {
+          e.preventDefault();
+          updateJoystick(t.clientX, t.clientY);
+          break;
+        }
+      }
+    };
+
+    const onTouchEnd = (e) => {
+      if (activeTouchId === null) return;
+      for (let i = 0; i < e.changedTouches.length; i++) {
+        const t = e.changedTouches[i];
+        if (t.identifier === activeTouchId) {
+          activeTouchId = null;
+          knob.style.transform = 'translate(0px, 0px)';
+          if (world) world.setJoystickVector(0, 0);
+          break;
+        }
+      }
+    };
+
+    function updateJoystick(clientX, clientY) {
+      let dx = clientX - baseCenter.x;
+      let dy = clientY - baseCenter.y;
+      const dist = Math.hypot(dx, dy);
+
+      if (dist > maxRadius) {
+        dx = (dx / dist) * maxRadius;
+        dy = (dy / dist) * maxRadius;
+      }
+
+      knob.style.transform = `translate(${dx}px, ${dy}px)`;
+      const normX = dx / maxRadius;
+      const normY = dy / maxRadius;
+      if (world) world.setJoystickVector(normX, normY);
+    }
+
+    window.addEventListener('touchmove', onTouchMove, { passive: false });
+    window.addEventListener('touchend', onTouchEnd, { passive: false });
+    window.addEventListener('touchcancel', onTouchEnd, { passive: false });
+  }
+
+  // Mobile Action Buttons
+  const btnInteract = document.getElementById('btn-mobile-interact');
+  if (btnInteract) {
+    btnInteract.addEventListener('click', () => {
+      if (!world) return;
+      const near = world.nearestInteractable;
+      if (near) {
+        if (near.type === 'user-corner') {
+          world.enterUserCornerCloseup();
+        } else if (near.type === 'shelf') {
+          world.enterShelfCloseup(near.id);
+        } else if (near.type === 'table') {
+          world.sitAtTable(near.id);
+        }
+      }
+    });
+  }
+
+  const btnLeave = document.getElementById('btn-mobile-leave');
+  if (btnLeave) {
+    btnLeave.addEventListener('click', () => {
+      closeTableTurntableHUD(true);
+    });
+  }
+
+  const btnDropLP = document.getElementById('btn-mobile-drop-lp');
+  if (btnDropLP) {
+    btnDropLP.addEventListener('click', () => {
+      setHeldLP(null);
+      showToast('손에 들고 있던 LP판을 내려놓았습니다.');
+    });
+  }
+
+  const btnCamReset = document.getElementById('btn-mobile-cam-reset');
+  if (btnCamReset) {
+    btnCamReset.addEventListener('click', () => {
+      if (world) world.resetCameraOrbit();
+      showToast('카메라 시점을 정면으로 재정렬했습니다.');
+    });
+  }
 }
