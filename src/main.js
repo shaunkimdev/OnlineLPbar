@@ -1341,7 +1341,8 @@ async function performRecommendSongSearch() {
   noteEl.textContent = '🔍 LP바 카탈로그 및 글로벌 음원 아카이브에서 곡과 앨범 커버를 찾고 있습니다...';
 
   try {
-    const results = await searchSongsByArtistAndTitle(artist, title, state.shelves, state.userSongs, 8);
+    const searchRes = await searchSongsByArtistAndTitle(artist, title, state.shelves, state.userSongs, 8);
+    const results = Array.isArray(searchRes) ? searchRes : (searchRes?.songs || []);
     recFormState.candidates = results;
     recFormState.matched = false;
     recFormState.confirmed = false;

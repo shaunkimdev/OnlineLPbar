@@ -102,10 +102,6 @@
         <span>💌 찐 유저 LP 코너</span>
       </button>
 
-      <button class="hud-btn hud-btn-gold" id="btn-top-recommend-song" title="가수·제목을 검색해 나만의 인생곡과 사연을 추천하기">
-        <span>✍️ 내 음악·사연 추천</span>
-      </button>
-
       <button class="hud-btn" id="btn-gender-switch" title="플레이 캐릭터(남자아이/여자아이) 전환">
         <span>👦 캐릭터: <strong id="current-gender-label">남자아이</strong></span>
       </button>
@@ -255,7 +251,6 @@
 
         <div class="lp-custom-add-row">
           <button id="btn-open-custom-lp" class="btn-text-link">+ 이 장르 책장에 내 유튜브 LP 추가하기</button>
-          <button id="btn-shelf-open-user-recommend" class="btn-text-link gold-link">💌 가수·제목 검색해서 내 사연과 함께 유저 LP 코너에 추천하기</button>
         </div>
       </div>
     </div>
@@ -279,10 +274,6 @@
       <div class="uc-header-actions">
         <button id="btn-uc-autoplay" class="uc-pill-btn" title="켜두면 LP를 넘길 때마다 자동으로 바늘을 올려 노래를 바로 재생합니다">
           <span>🔊 곡 넘길 때 자동 청음: <strong id="uc-autoplay-state">OFF</strong></span>
-        </button>
-
-        <button id="btn-uc-open-recommend" class="uc-recommend-cta">
-          <span>✍️ 내 음악·사연 추천하기</span>
         </button>
 
         <button id="btn-uc-goto-shelves" class="uc-pill-btn">
@@ -392,6 +383,10 @@
 
         <!-- Bottom Action Buttons -->
         <div class="uc-bottom-actions">
+          <button type="button" id="btn-uc-open-recommend" class="btn-uc-recommend-big" title="가수·제목을 검색해 나만의 음악과 사연을 코너에 추천 등록하기">
+            <span>✍️ 내 음악 &amp; 사연 추천하기 (가수·제목 검색)</span>
+          </button>
+
           <button type="button" id="btn-uc-random" class="btn-random-dig">
             <span>🎲 다른 유저 사연 랜덤 넘기기</span>
             <kbd>Space</kbd>

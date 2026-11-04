@@ -2179,6 +2179,33 @@ input[type='range'] {
   margin-top: 2px;
 }
 
+.btn-uc-recommend-big {
+  width: 100%;
+  padding: 13px 18px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(230, 110, 150, 0.28) 0%, rgba(217, 155, 78, 0.35) 100%);
+  border: 1.5px solid rgba(255, 170, 200, 0.55);
+  color: #fff;
+  font-family: 'Noto Sans KR', sans-serif;
+  font-size: 0.98rem;
+  font-weight: 800;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  box-shadow: 0 4px 18px rgba(230, 90, 140, 0.28);
+  transition: all 0.18s ease;
+  letter-spacing: -0.01em;
+}
+
+.btn-uc-recommend-big:hover {
+  background: linear-gradient(135deg, rgba(230, 110, 150, 0.45) 0%, rgba(217, 155, 78, 0.52) 100%);
+  border-color: rgba(255, 190, 220, 0.9);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(230, 90, 140, 0.48);
+}
+
 /* =========================================================================
    TABLE HUD USER STORY BOX
    ========================================================================= */

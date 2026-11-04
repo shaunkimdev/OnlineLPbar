@@ -709,11 +709,12 @@ export async function searchSongsByArtistAndTitle(artist, title, genreShelves = 
     });
   }
 
-  return {
-    songs,
-    usedRewrite,
-    queries
-  };
+  // Return songs array as primary result, attaching helper metadata for backward compatibility
+  const results = songs;
+  results.songs = songs;
+  results.usedRewrite = usedRewrite;
+  results.queries = queries;
+  return results;
 }
 
 // Look up 30-sec audio preview & high-res artwork on demand (like yourmusic's lookupPreviewUrl)
