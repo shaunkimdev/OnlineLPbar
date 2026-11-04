@@ -1420,8 +1420,9 @@ export class LPBarWorld {
   }
 
   updateRemotePeer(peerData) {
-    if (!peerData || !peerData.id) return;
-    let entry = this.remotePlayers.get(peerData.id);
+    const peerId = peerData?.peerId || peerData?.id;
+    if (!peerId) return;
+    let entry = this.remotePlayers.get(peerId);
 
     if (!entry) {
       const group = new THREE.Group();
@@ -1446,7 +1447,7 @@ export class LPBarWorld {
       this.scene.add(group);
 
       entry = {
-        id: peerData.id,
+        id: peerId,
         group,
         rig,
         gender,
@@ -1464,7 +1465,7 @@ export class LPBarWorld {
         chatText: '',
         chatExpiresAt: 0
       };
-      this.remotePlayers.set(peerData.id, entry);
+      this.remotePlayers.set(peerId, entry);
     }
 
     // Handle gender switch if remote user changed character
@@ -1515,16 +1516,21 @@ export class LPBarWorld {
       }
     }
 
-    // Update nickname & 3D speech bubble if changed
-    const nextNick = peerData.nickname || '익명의 디거';
-    const now = performance.now();
-    const activeChat = peerData.chatExpiresAt && peerData.chatExpiresAt > now ? peerData.chatText || '' : '';
-    if (entry.nickname !== nextNick || entry.chatText !== activeChat) {
+    // Update nickname label if changed (speech bubbles are driven by showRemoteChatBubble)
+    const nextNick = String(peerData.nickname || '익명의 디거').slice(0, 18);
+    if (entry.nickname !== nextNick) {
       entry.nickname = nextNick;
-      entry.chatText = activeChat;
-      entry.chatExpiresAt = peerData.chatExpiresAt || 0;
       this._drawPlayerHeadCanvas(entry.labelSprite, entry.nickname, entry.chatText);
     }
+  }
+
+  // Show a 3D speech bubble above a remote peer (expiry uses local clock to avoid cross-device clock skew)
+  showRemoteChatBubble(peerId, text) {
+    const entry = this.remotePlayers.get(peerId);
+    if (!entry) return;
+    entry.chatText = String(text || '').slice(0, 56);
+    entry.chatExpiresAt = performance.now() + 6800;
+    this._drawPlayerHeadCanvas(entry.labelSprite, entry.nickname, entry.chatText);
   }
 
   removeRemotePeer(peerId) {

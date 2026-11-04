@@ -117,18 +117,29 @@ window.addEventListener('DOMContentLoaded', () => {
     }
   };
 
-  setupMultiplayerSync();
-  setupEntranceOverlay();
-  setupTopHUD();
-  setupShelfDiggingUI();
-  setupUserCornerUI();
-  setupRecommendSongModal();
-  setupTableTurntableHUD();
-  setupNowPlayingBar();
-  setupAmbientDrawer();
-  setupCoasterGuestbook();
-  setupCustomLPModal();
-  setupGlobalHotkeys();
+  // Run each setup step independently so one failing module can never block the others
+  // (e.g. a multiplayer error must not prevent the entrance button from working)
+  const setupSteps = [
+    setupMultiplayerSync,
+    setupEntranceOverlay,
+    setupTopHUD,
+    setupShelfDiggingUI,
+    setupUserCornerUI,
+    setupRecommendSongModal,
+    setupTableTurntableHUD,
+    setupNowPlayingBar,
+    setupAmbientDrawer,
+    setupCoasterGuestbook,
+    setupCustomLPModal,
+    setupGlobalHotkeys
+  ];
+  setupSteps.forEach((step) => {
+    try {
+      step();
+    } catch (err) {
+      console.error(`[setup] ${step.name} failed: ${err?.message || err}`, err);
+    }
+  });
 
   // Pre-seed Table A-1 with a classic Jazz record paused on platter so users can also test immediately
   const initialJazzLP = state.shelves[0].records[0];
@@ -161,9 +172,10 @@ function setupEntranceOverlay() {
   const btnEnter = document.getElementById('btn-enter-bar');
   const nickInput = document.getElementById('entrance-nickname');
   const btnRandomNick = document.getElementById('btn-random-nickname');
+  let hasEntered = false;
 
-  if (nickInput && mp) {
-    nickInput.value = mp.localPlayer.nickname;
+  if (nickInput) {
+    nickInput.value = getLocalNickname();
     nickInput.addEventListener('input', () => {
       const val = nickInput.value.trim();
       if (val) {
@@ -187,18 +199,34 @@ function setupEntranceOverlay() {
   });
 
   btnEnter.addEventListener('click', async () => {
-    if (nickInput) {
-      const nickVal = nickInput.value.trim() || generateRandomNickname();
-      updateLocalNickname(nickVal);
-    }
-    await audio.init();
-    audio.playSleeveFlip();
+    if (hasEntered) return;
+    hasEntered = true;
+
+    // Hide the overlay first so entering never depends on audio/network initialization succeeding
     overlay.style.opacity = '0';
     setTimeout(() => overlay.classList.add('hidden'), 480);
-    if (mp) {
-      mp.broadcastPresence();
+
+    const nickVal = (nickInput?.value || '').trim() || getLocalNickname();
+    updateLocalNickname(nickVal);
+
+    try {
+      await audio.init();
+      audio.playSleeveFlip();
+    } catch (err) {
+      console.warn('Audio init failed:', err);
     }
-    showToast(`🎷 [${mp ? mp.localPlayer.nickname : '디거'}]님, 미드나잇 그루브 LP바에 오신 것을 환영합니다!`);
+
+    // Join the real-time multiplayer room only after entering the bar
+    try {
+      if (mp && !mp.started) {
+        mp.started = true;
+        mp.init({ nickname: getLocalNickname(), gender: world.playerGender });
+      }
+    } catch (err) {
+      console.warn('Multiplayer init failed:', err);
+    }
+
+    showToast(`🎷 [${getLocalNickname()}]님, 미드나잇 그루브 LP바에 오신 것을 환영합니다!`);
   });
 }
 
@@ -652,7 +680,7 @@ function setupUserCornerUI() {
     syncMoodTabButtons();
     audio.playSleeveFlip();
     renderUserCornerCrateCards(true);
-    showToast(`✨ '${query}' 기분에 어울리는 [${result.moodMeta.emoji} ${result.moodMeta.ko}] 사연곡을 찾았습니다!`);
+    showToast(`✨ '${query}' 기분에 어울리는 [${result.moodMeta.emoji} ${result.moodMeta.shortKo}] 사연곡을 찾았습니다!`);
   };
 
   btnMoodRecommend.addEventListener('click', runMoodSearch);
@@ -729,12 +757,12 @@ function renderUserCornerMoodTabs() {
   allBtn.addEventListener('click', () => filterUserSongsByMood('all'));
   container.appendChild(allBtn);
 
-  MOOD_CATEGORIES.forEach((m) => {
+  Object.values(MOOD_CATEGORIES).forEach((m) => {
     const chip = document.createElement('button');
     chip.type = 'button';
     chip.className = 'uc-mood-chip';
     chip.dataset.mood = m.key;
-    chip.textContent = `${m.emoji} ${m.ko}`;
+    chip.textContent = `${m.emoji} ${m.shortKo}`;
     chip.addEventListener('click', () => filterUserSongsByMood(m.key));
     container.appendChild(chip);
   });
@@ -757,7 +785,7 @@ function filterUserSongsByMood(moodKey) {
     const matched = state.userSongs.filter((s) => s.mood === moodKey);
     if (matched.length === 0) {
       const meta = getMoodMeta(moodKey);
-      showToast(`아직 [${meta.emoji} ${meta.ko}] 무드의 사연곡이 없어 전체 사연곡을 표시합니다.`);
+      showToast(`아직 [${meta.emoji} ${meta.shortKo}] 무드의 사연곡이 없어 전체 사연곡을 표시합니다.`);
       state.activeMoodFilter = 'all';
       state.filteredUserSongs = [...state.userSongs];
     } else {
@@ -875,7 +903,7 @@ function renderUserCornerCrateCards(shouldAutoPlay = false) {
     ribbon.className = 'uc-sleeve-ribbon';
     const recName = lp.recommender?.name || '익명 디거';
     const moodMeta = getMoodMeta(lp.mood);
-    ribbon.innerHTML = `<span>${moodMeta.emoji} ${recName}님의 사연</span><strong>♥ ${lp.heartCount || 1}</strong>`;
+    ribbon.innerHTML = `<span>${moodMeta.emoji} ${escapeHTML(recName)}님의 사연</span><strong>♥ ${Number(lp.heartCount) || 1}</strong>`;
 
     card.appendChild(discPeek);
     card.appendChild(img);
@@ -960,7 +988,7 @@ function updateUserCornerInspector(lp) {
   document.getElementById('uc-detail-index').textContent = `${String(activeIdx + 1).padStart(2, '0')} / ${String(records.length).padStart(2, '0')}`;
 
   const moodBadge = document.getElementById('uc-detail-mood');
-  moodBadge.textContent = `${moodMeta.emoji} ${moodMeta.ko}`;
+  moodBadge.textContent = `${moodMeta.emoji} ${moodMeta.shortKo}`;
   moodBadge.style.borderColor = moodMeta.color;
   moodBadge.style.color = moodMeta.color;
 
@@ -1551,7 +1579,7 @@ async function submitUserSongRecommendation() {
     startUserCornerPlayback(newSongLP, true);
 
     const moodMeta = getMoodMeta(newSongLP.mood);
-    showToast(`💌 [${name}]님의 추천곡 '${title}'이(가) [${moodMeta.emoji} ${moodMeta.ko}] LP 코너에 등록되어 재생됩니다!`);
+    showToast(`💌 [${name}]님의 추천곡 '${title}'이(가) [${moodMeta.emoji} ${moodMeta.shortKo}] LP 코너에 등록되어 재생됩니다!`);
   } finally {
     btnSubmit.disabled = false;
     btnSubmit.textContent = '💿 사연과 함께 유저 LP 코너에 꽂기';
@@ -2070,11 +2098,11 @@ function renderCoasterNotes() {
     card.className = 'coaster-card';
     card.innerHTML = `
       <div class="coaster-card-top">
-        <strong>🥃 ${c.nickname} · ${c.table}</strong>
-        <span>${c.time}</span>
+        <strong>🥃 ${escapeHTML(c.nickname)} · ${escapeHTML(c.table)}</strong>
+        <span>${escapeHTML(c.time)}</span>
       </div>
-      <div class="coaster-card-lp">💿 ${c.lpTitle}</div>
-      <p>${c.message}</p>
+      <div class="coaster-card-lp">💿 ${escapeHTML(c.lpTitle)}</div>
+      <p>${escapeHTML(c.message)}</p>
     `;
     list.appendChild(card);
   });
@@ -2136,151 +2164,167 @@ function setupCustomLPModal() {
 // =========================================================================
 // 9-B. REAL-TIME MULTIPLAYER SYNCHRONIZATION & LOUNGE CHAT
 // =========================================================================
+// Remote data arrives from a public relay, so always escape before inserting into HTML
+function escapeHTML(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function getLocalNickname() {
+  return mp?.localState?.nickname || '익명의 디거';
+}
+
 function updateLocalNickname(nick) {
-  const safeNick = (nick || '익명의 디거').trim().slice(0, 16);
-  if (mp) {
-    mp.setNickname(safeNick);
-  }
+  const safeNick = (nick || '').trim().slice(0, 16) || getLocalNickname();
+  const applied = mp ? mp.setNickname(safeNick) : safeNick;
   if (world) {
-    world.updateLocalPlayerLabel(safeNick);
+    world.updateLocalPlayerLabel(applied);
   }
   const myNickEl = document.getElementById('mp-my-nickname');
-  if (myNickEl) myNickEl.textContent = safeNick;
+  if (myNickEl) myNickEl.textContent = applied;
+  if (mp) renderPeerChips(mp.getPeersArray());
+}
+
+// Resolve a lightweight LP reference (id/title/artist) received from the network into the full local LP object
+function resolveLPReference(lpRef) {
+  if (!lpRef || !lpRef.id) return lpRef || null;
+  for (const shelf of state.shelves) {
+    const found = shelf.records.find((r) => r.id === lpRef.id);
+    if (found) return found;
+  }
+  const userFound = state.userSongs.find((s) => s.id === lpRef.id);
+  return userFound || lpRef;
+}
+
+function applyRemotePeerToWorld(peerData) {
+  if (!world || !peerData) return;
+  world.updateRemotePeer({
+    ...peerData,
+    heldLP: resolveLPReference(peerData.heldLP)
+  });
 }
 
 function setupMultiplayerSync() {
-  const initialNick = generateRandomNickname();
-  mp = new MultiplayerSync({
-    nickname: initialNick,
-    gender: world ? world.playerGender : 'male'
-  });
-
-  const myNickEl = document.getElementById('mp-my-nickname');
-  if (myNickEl) myNickEl.textContent = initialNick;
-  if (world) {
-    world.updateLocalPlayerLabel(initialNick);
-  }
-
-  // 1. Connection status
   const connBadge = document.getElementById('mp-conn-badge');
   const liveDot = document.getElementById('mp-live-dot');
   const panelDot = document.getElementById('mp-panel-dot');
+  const seenPeerStatus = new Map();
 
-  mp.onConnectionChange = (connected) => {
-    if (connBadge) {
-      connBadge.textContent = connected ? '실시간 동기화' : '재연결 중';
-      connBadge.classList.toggle('online', connected);
-    }
-    if (liveDot) liveDot.classList.toggle('online', connected);
-    if (panelDot) panelDot.classList.toggle('online', connected);
-  };
-
-  // 2. Peer updates & joins
-  mp.onPeerUpdate = (peerData, isNew) => {
-    if (world) {
-      world.updateRemotePeer(peerData);
-    }
-    if (isNew) {
-      appendChatMessage({
-        sender: 'system',
-        text: `👋 [${peerData.nickname || '새로운 디거'}]님이 LP바에 입장했습니다.`
-      });
-      showToast(`👋 [${peerData.nickname || '새로운 디거'}]님이 LP바에 입장했습니다.`);
-    }
-  };
-
-  mp.onPeerLeave = (peerId, peerData) => {
-    if (world) {
-      world.removeRemotePeer(peerId);
-    }
-    appendChatMessage({
-      sender: 'system',
-      text: `🚪 [${peerData?.nickname || '디거'}]님이 퇴장했습니다.`
-    });
-  };
-
-  // 3. Online count and peer chips
-  mp.onPeersCountChange = (count, peers) => {
-    const onlineCountEl = document.getElementById('mp-online-count');
-    const panelCountEl = document.getElementById('mp-panel-count');
-    if (onlineCountEl) onlineCountEl.textContent = String(count);
-    if (panelCountEl) panelCountEl.textContent = String(count);
-
-    renderPeerChips(peers);
-  };
-
-  // 4. Chat messages
-  mp.onChatMessage = (msg) => {
-    appendChatMessage(msg);
-  };
-
-  // 5. Table turntables sync
-  mp.onTableUpdate = (payload) => {
-    const table = state.tables.find((t) => t.id === payload.tableId);
-    if (!table) return;
-
-    table.currentLP = payload.currentLP;
-    table.rpm = payload.rpm || 33;
-    table.isPlaying = Boolean(payload.isPlaying);
-
-    if (world) {
-      world.updateTableTurntableVisual(table.id);
-    }
-
-    if (table.isPlaying) {
-      state.playingTableId = table.id;
-      // If user is seated at this table, start turntable audio
-      if (state.seatedTable && state.seatedTable.id === table.id) {
-        audio.startTurntableLP(table.currentLP, table.rpm, true);
-        refreshTableHUD();
-      } else if (!state.seatedTable && !state.userCornerPlaying) {
-        // If not playing anything else, enjoy the bar's playing turntable
-        audio.startTurntableLP(table.currentLP, table.rpm, false);
+  mp = new MultiplayerSync({
+    // 1. Connection status
+    onConnectionChange: (connected) => {
+      if (connBadge) {
+        connBadge.textContent = connected ? '실시간 동기화' : '재연결 중';
+        connBadge.classList.toggle('online', connected);
       }
-      showToast(`🎵 [${table.name}]에서 '${table.currentLP?.title || 'LP'}' 음악이 재생 중입니다.`);
-    } else {
-      if (state.playingTableId === table.id) {
-        state.playingTableId = null;
-        if (state.seatedTable && state.seatedTable.id === table.id) {
-          audio.stopTurntable(true);
-          refreshTableHUD();
-        } else if (!state.userCornerPlaying) {
+      if (liveDot) liveDot.classList.toggle('online', connected);
+      if (panelDot) panelDot.classList.toggle('online', connected);
+    },
+
+    // 2. Peer joins & state updates
+    onPeerUpdate: (peerData, isNew) => {
+      applyRemotePeerToWorld(peerData);
+
+      // Refresh peer chips only when a peer's visible status changes (not on every movement packet)
+      const statusKey = `${peerData.nickname}|${peerData.gender}|${peerData.isSeated}|${peerData.seatedTableId}`;
+      if (seenPeerStatus.get(peerData.peerId) !== statusKey) {
+        seenPeerStatus.set(peerData.peerId, statusKey);
+        renderPeerChips(mp.getPeersArray());
+      }
+
+      if (isNew) {
+        const nick = peerData.nickname || '새로운 디거';
+        appendChatMessage({ sender: 'system', text: `👋 [${nick}]님이 LP바에 입장했습니다.` });
+        showToast(`👋 [${nick}]님이 LP바에 입장했습니다.`);
+      }
+    },
+
+    onPeerLeave: (peerId, peerData) => {
+      seenPeerStatus.delete(peerId);
+      if (world) world.removeRemotePeer(peerId);
+      appendChatMessage({ sender: 'system', text: `🚪 [${peerData?.nickname || '디거'}]님이 퇴장했습니다.` });
+    },
+
+    // 3. Online count
+    onPeersCountChange: (count, peers) => {
+      const onlineCountEl = document.getElementById('mp-online-count');
+      const panelCountEl = document.getElementById('mp-panel-count');
+      if (onlineCountEl) onlineCountEl.textContent = String(count);
+      if (panelCountEl) panelCountEl.textContent = String(count);
+      renderPeerChips(peers);
+    },
+
+    // 4. Chat messages (log + 3D speech bubble above the sender)
+    onChatMessage: (msg) => {
+      appendChatMessage(msg);
+      if (world && msg.peerId) world.showRemoteChatBubble(msg.peerId, msg.text);
+    },
+
+    // 5. Table turntable sync
+    onTableUpdate: (payload) => {
+      const table = state.tables.find((t) => t.id === payload.tableId);
+      if (!table) return;
+
+      const wasMyAudio = state.playingTableId === table.id;
+      const iAmSeatedHere = state.seatedTable?.id === table.id;
+
+      table.currentLP = resolveLPReference(payload.currentLP);
+      table.rpm = payload.rpm === 45 ? 45 : 33;
+      table.isPlaying = Boolean(payload.isPlaying) && Boolean(table.currentLP);
+      if (world) world.updateTableTurntableVisual(table.id);
+
+      // Audio only follows remote changes for the table I'm sitting at / listening to
+      if (iAmSeatedHere || wasMyAudio) {
+        if (table.isPlaying) {
+          if (state.userCornerPlaying) {
+            state.userCornerPlaying = false;
+            if (world) world.updateUserCornerVisuals(state.userSongs, state.userCornerActiveLP, false);
+          }
+          state.playingTableId = table.id;
+          audio.startTurntableLP(table.currentLP, table.rpm, true);
+        } else {
           audio.stopTurntable(true);
         }
+        refreshTableHUD();
+        refreshNowPlayingBar();
       }
-    }
 
-    refreshNowPlayingBar();
-  };
+      if (payload.actionType === 'play' && table.currentLP) {
+        showToast(`🎵 [${payload.nickname || '디거'}]님이 ${table.name}에서 '${table.currentLP.title}'을(를) 재생했습니다.`);
+      }
+    },
 
-  // 6. User Song & Story recommendation sync
-  mp.onUserSongAdded = (payload) => {
-    const newSong = payload.songLP;
-    if (!newSong || !newSong.id) return;
-    const exists = state.userSongs.some((s) => s.id === newSong.id);
-    if (!exists) {
+    // 6. User song & story recommendation sync
+    onUserSongAdded: (payload) => {
+      const newSong = payload.song;
+      if (!newSong || !newSong.id) return;
+      if (state.userSongs.some((s) => s.id === newSong.id)) return;
+
       state.userSongs.unshift(newSong);
-      state.filteredUserSongs = state.activeMoodFilter === 'all'
-        ? [...state.userSongs]
-        : state.userSongs.filter((s) => s.mood === state.activeMoodFilter);
+      state.filteredUserSongs =
+        state.activeMoodFilter === 'all'
+          ? [...state.userSongs]
+          : state.userSongs.filter((s) => s.mood === state.activeMoodFilter);
 
       if (world) {
-        world.updateUserCornerVisuals(state.userSongs, state.userCornerActiveLP || newSong, state.userCornerPlaying);
+        world.updateUserCornerVisuals(state.userSongs, state.userCornerActiveLP, state.userCornerPlaying);
       }
       if (state.openUserCorner) {
+        syncMoodTabButtons();
         renderUserCornerCrateCards(false);
       }
-      appendChatMessage({
-        sender: 'system',
-        text: `💌 [${newSong.recommender?.name || '유저'}]님이 새 사연곡 '${newSong.title}'을(를) 추천했습니다!`
-      });
-      showToast(`💌 [${newSong.recommender?.name || '유저'}]님이 새 사연곡 '${newSong.title}'을(를) 추천했습니다!`);
-    }
-  };
+      const recName = newSong.recommender?.name || payload.nickname || '유저';
+      appendChatMessage({ sender: 'system', text: `💌 [${recName}]님이 새 사연곡 '${newSong.title}'을(를) 추천했습니다!` });
+      showToast(`💌 [${recName}]님이 새 사연곡 '${newSong.title}'을(를) 추천했습니다!`);
+    },
 
-  mp.onUserSongHeart = (payload) => {
-    const song = state.userSongs.find((s) => s.id === payload.songId);
-    if (song) {
+    onUserSongHeart: (payload) => {
+      const song = state.userSongs.find((s) => s.id === payload.songId);
+      if (!song || !Number.isFinite(payload.heartCount)) return;
       song.heartCount = payload.heartCount;
       state.heartState.counts[song.id] = payload.heartCount;
       saveHeartState(state.heartState);
@@ -2291,91 +2335,84 @@ function setupMultiplayerSync() {
           if (hcEl) hcEl.textContent = String(song.heartCount);
         }
       }
-    }
-  };
+    },
 
-  // 7. User Corner playback sync
-  mp.onUserCornerPlayback = (payload) => {
-    if (world) {
-      world.updateUserCornerVisuals(state.userSongs, payload.activeLP, payload.isPlaying);
-    }
-    if (payload.isPlaying && payload.activeLP) {
-      state.userCornerActiveLP = payload.activeLP;
-      // If user isn't seated at an active playing table, let them hear what the User Corner is playing
-      if (!state.seatedTable?.isPlaying) {
-        audio.startTurntableLP(payload.activeLP, payload.activeLP.rpm || 33, false);
-      }
-      refreshNowPlayingBar();
-    }
-  };
+    // 7. User Corner playback: visual-only sync (each visitor's 1st-person listening stays personal)
+    onUserCornerPlayback: (payload) => {
+      if (!world || state.userCornerPlaying) return;
+      world.updateUserCornerVisuals(state.userSongs, resolveLPReference(payload.activeLP), Boolean(payload.isPlaying));
+    },
 
-  // 8. Whiskey coaster guestbook note sync
-  mp.onCoasterAdded = (payload) => {
-    const note = payload.coasterNote;
-    if (!note || !note.id) return;
-    const exists = state.coasters.some((c) => c.id === note.id);
-    if (!exists) {
+    // 8. Whiskey coaster guestbook sync
+    onCoasterAdded: (payload) => {
+      const note = payload.coaster;
+      if (!note || !note.id) return;
+      if (state.coasters.some((c) => c.id === note.id)) return;
       state.coasters.unshift(note);
       renderCoasterNotes();
-      showToast(`🥃 [${note.nickname}]님이 방명록 코스터를 남겼습니다: "${note.message.slice(0, 25)}…"`);
-    }
-  };
+      showToast(`🥃 [${note.nickname}]님이 방명록 코스터를 남겼습니다.`);
+    },
 
-  // 9. Mood lighting sync
-  mp.onMoodChanged = (payload) => {
-    if (world && Number.isFinite(payload.moodIndex)) {
+    // 9. Mood lighting sync
+    onMoodChanged: (payload) => {
+      if (!world || !Number.isFinite(payload.moodIndex)) return;
       const moodName = world.setMoodByIndex(payload.moodIndex);
       const moodNameEl = document.getElementById('mood-name');
       if (moodNameEl) moodNameEl.textContent = moodName;
-      showToast(`🕯️ 조명 테마가 [${moodName}] 모드로 동기화되었습니다.`);
-    }
-  };
+      showToast(`🕯️ [${payload.nickname || '디거'}]님이 조명을 [${moodName}] 모드로 바꿨습니다.`);
+    },
 
-  // 10. State Snapshot for newly connecting peers
-  mp.onStateRequest = () => {
-    return {
-      tables: state.tables.map((t) => ({
-        id: t.id,
-        currentLP: t.currentLP,
-        isPlaying: t.isPlaying,
-        rpm: t.rpm
-      })),
-      coasters: state.coasters.slice(0, 15),
-      moodIndex: world ? world.moodIndex : 0,
-      userCornerPlaying: state.userCornerPlaying,
-      userCornerActiveLP: state.userCornerActiveLP
-    };
-  };
-
-  mp.onStateSnapshot = (snap) => {
-    if (!snap) return;
-    if (Array.isArray(snap.tables)) {
-      snap.tables.forEach((st) => {
-        const localT = state.tables.find((t) => t.id === st.id);
-        if (localT && st.currentLP) {
-          localT.currentLP = st.currentLP;
-          localT.isPlaying = Boolean(st.isPlaying);
-          localT.rpm = st.rpm || 33;
-          if (world) world.updateTableTurntableVisual(localT.id);
-        }
+    // 10. Late-joiner state snapshot
+    onStateRequest: () => {
+      mp.sendStateSnapshot({
+        tables: state.tables.map((t) => ({
+          id: t.id,
+          currentLP: t.currentLP,
+          isPlaying: Boolean(t.isPlaying),
+          rpm: t.rpm
+        })),
+        coasters: state.coasters.slice(0, 15),
+        moodIndex: world ? world.moodIndex : 0
       });
-    }
-    if (Array.isArray(snap.coasters) && snap.coasters.length > 0) {
-      snap.coasters.forEach((c) => {
-        if (!state.coasters.some((ex) => ex.id === c.id)) {
-          state.coasters.push(c);
-        }
-      });
-      renderCoasterNotes();
-    }
-    if (Number.isFinite(snap.moodIndex) && world) {
-      const moodName = world.setMoodByIndex(snap.moodIndex);
-      const moodNameEl = document.getElementById('mood-name');
-      if (moodNameEl) moodNameEl.textContent = moodName;
-    }
-  };
+    },
 
-  // 11. Chat UI events
+    onStateSnapshot: (snap) => {
+      if (Array.isArray(snap.tables)) {
+        snap.tables.forEach((st) => {
+          const localT = state.tables.find((t) => t.id === st.id);
+          // Only adopt remote table visuals; don't hijack local audio
+          if (localT && st.currentLP && state.playingTableId !== localT.id) {
+            localT.currentLP = resolveLPReference(st.currentLP);
+            localT.isPlaying = Boolean(st.isPlaying);
+            localT.rpm = st.rpm === 45 ? 45 : 33;
+            if (world) world.updateTableTurntableVisual(localT.id);
+          }
+        });
+      }
+      if (Array.isArray(snap.coasters) && snap.coasters.length > 0) {
+        let added = false;
+        snap.coasters.forEach((c) => {
+          if (c && c.id && !state.coasters.some((ex) => ex.id === c.id)) {
+            state.coasters.push(c);
+            added = true;
+          }
+        });
+        if (added) renderCoasterNotes();
+      }
+      if (Number.isFinite(snap.moodIndex) && world) {
+        const moodName = world.setMoodByIndex(snap.moodIndex);
+        const moodNameEl = document.getElementById('mood-name');
+        if (moodNameEl) moodNameEl.textContent = moodName;
+      }
+    }
+  });
+
+  const initialNick = getLocalNickname();
+  const myNickEl = document.getElementById('mp-my-nickname');
+  if (myNickEl) myNickEl.textContent = initialNick;
+  if (world) world.updateLocalPlayerLabel(initialNick);
+
+  renderPeerChips([]);
   setupChatUI();
 }
 
@@ -2384,23 +2421,19 @@ function renderPeerChips(peers) {
   if (!container) return;
   container.innerHTML = '';
 
-  // Local player chip
   const myChip = document.createElement('div');
   myChip.className = 'mp-peer-chip my-chip';
   const myGenderIcon = world?.playerGender === 'female' ? '👧' : '👦';
-  myChip.innerHTML = `<span class="peer-gender">${myGenderIcon}</span><strong>${mp?.localPlayer?.nickname || '나'}</strong><small>(나)</small>`;
+  myChip.innerHTML = `<span class="peer-gender">${myGenderIcon}</span><strong>${escapeHTML(getLocalNickname())}</strong><small>(나)</small>`;
   container.appendChild(myChip);
 
-  // Other peers
-  peers.forEach((peer) => {
+  (peers || []).forEach((peer) => {
     const chip = document.createElement('div');
     chip.className = 'mp-peer-chip';
     const pGenderIcon = peer.gender === 'female' ? '👧' : '👦';
-    let statusText = '';
-    if (peer.isSeated && peer.seatedTableId) {
-      statusText = ` · ${peer.seatedTableId} 착석`;
-    }
-    chip.innerHTML = `<span class="peer-gender">${pGenderIcon}</span><span>${peer.nickname || '디거'}</span><small>${statusText}</small>`;
+    const tableName = peer.isSeated ? state.tables.find((t) => t.id === peer.seatedTableId)?.code : '';
+    const statusText = tableName ? ` · ${tableName} 착석` : '';
+    chip.innerHTML = `<span class="peer-gender">${pGenderIcon}</span><span>${escapeHTML(peer.nickname || '디거')}</span><small>${escapeHTML(statusText)}</small>`;
     container.appendChild(chip);
   });
 }
@@ -2412,17 +2445,22 @@ function appendChatMessage(msg) {
   const div = document.createElement('div');
   if (msg.sender === 'system') {
     div.className = 'mp-msg mp-msg-system';
-    div.innerHTML = `<span>${msg.text}</span>`;
+    div.innerHTML = `<span>${escapeHTML(msg.text)}</span>`;
   } else {
-    const isMe = msg.peerId === mp?.localPlayer?.id;
+    const isMe = msg.peerId && msg.peerId === mp?.peerId;
     div.className = `mp-msg ${isMe ? 'mp-msg-mine' : 'mp-msg-peer'}`;
-    const timeStr = new Date(msg.timestamp || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const timeStr = new Date(msg.ts || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     div.innerHTML = `
-      <div class="mp-msg-sender">${isMe ? '★ 나' : msg.nickname} <time>${timeStr}</time></div>
-      <div class="mp-msg-content">${msg.text}</div>
+      <div class="mp-msg-sender">${isMe ? '★ 나' : escapeHTML(msg.nickname || '디거')} <time>${timeStr}</time></div>
+      <div class="mp-msg-content">${escapeHTML(msg.text)}</div>
     `;
   }
   container.appendChild(div);
+
+  // Keep the log bounded
+  while (container.children.length > 80) {
+    container.removeChild(container.firstChild);
+  }
   container.scrollTop = container.scrollHeight;
 }
 
@@ -2434,11 +2472,10 @@ function setupChatUI() {
   const chatInput = document.getElementById('mp-chat-input');
 
   const togglePanel = () => {
-    if (panel) {
-      panel.classList.toggle('collapsed');
-      if (btnToggle) {
-        btnToggle.textContent = panel.classList.contains('collapsed') ? '▴' : '▾';
-      }
+    if (!panel) return;
+    panel.classList.toggle('collapsed');
+    if (btnToggle) {
+      btnToggle.textContent = panel.classList.contains('collapsed') ? '▴' : '▾';
     }
   };
 
@@ -2451,19 +2488,21 @@ function setupChatUI() {
       const text = chatInput.value.trim();
       if (!text) return;
 
-      if (mp) {
-        mp.broadcastChatMessage(text);
-      }
-      if (world) {
-        world.updateLocalPlayerLabel(mp ? mp.localPlayer.nickname : '나', text);
-      }
+      if (mp) mp.broadcastChatMessage(text);
+      if (world) world.updateLocalPlayerLabel(getLocalNickname(), text);
       appendChatMessage({
-        peerId: mp?.localPlayer?.id,
-        nickname: mp?.localPlayer?.nickname || '나',
+        peerId: mp?.peerId,
+        nickname: getLocalNickname(),
         text,
-        timestamp: Date.now()
+        ts: Date.now()
       });
       chatInput.value = '';
+      // Return focus to the 3D world so WASD works immediately after sending
+      chatInput.blur();
+    });
+
+    chatInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') chatInput.blur();
     });
   }
 }
