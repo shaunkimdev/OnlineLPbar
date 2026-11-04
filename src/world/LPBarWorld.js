@@ -38,12 +38,13 @@ export class LPBarWorld {
 
     // Camera modes: 'walk' | 'shelf-closeup' | 'table-closeup' | 'zone-overview'
     this.cameraMode = 'walk';
-    this.cameraOrbitAngle = 0; // User right-drag orbit offset
-    this.cameraZoomDist = 7.8;
-    this.cameraCurrentPos = new THREE.Vector3(0, 6.5, 6);
-    this.cameraCurrentLook = new THREE.Vector3(0, 1.4, -2);
-    this.cameraTargetPos = new THREE.Vector3(0, 6.5, 6);
-    this.cameraTargetLook = new THREE.Vector3(0, 1.4, -2);
+    this.cameraOrbitAngle = 0; // User right-drag horizontal orbit offset (yaw)
+    this.cameraPitchAngle = 0.50; // User right-drag vertical pitch elevation (pitch)
+    this.cameraZoomDist = 8.0;
+    this.cameraCurrentPos = new THREE.Vector3(0, 5.5, 6);
+    this.cameraCurrentLook = new THREE.Vector3(0, 1.35, -2);
+    this.cameraTargetPos = new THREE.Vector3(0, 5.5, 6);
+    this.cameraTargetLook = new THREE.Vector3(0, 1.35, -2);
 
     // Character state
     this.charPos = new THREE.Vector3((Math.random() - 0.5) * 3.2, 0, -5.5 + (Math.random() - 0.5) * 0.8); // Slight random spawn offset for multiplayer
@@ -1840,6 +1841,7 @@ export class LPBarWorld {
 
   resetCameraOrbit() {
     this.cameraOrbitAngle = 0;
+    this.cameraPitchAngle = 0.50;
   }
 
   // =========================================================================
@@ -1900,9 +1902,10 @@ export class LPBarWorld {
       this.keys = {};
     });
 
-    // Right-click drag to orbit camera in walk mode, wheel to zoom
+    // Right-click drag to orbit camera horizontally and vertically in walk mode, wheel to zoom
     let isRightDragging = false;
     let prevX = 0;
+    let prevY = 0;
     this.renderer.domElement.addEventListener('contextmenu', (e) => e.preventDefault());
 
     this.renderer.domElement.addEventListener('mousedown', (e) => {
@@ -1913,16 +1916,21 @@ export class LPBarWorld {
       if (e.button === 2) {
         isRightDragging = true;
         prevX = e.clientX;
+        prevY = e.clientY;
       } else if (e.button === 0 && this.cameraMode === 'walk' && !this.isSeated) {
         this._handleCanvasClick(e);
       }
     });
 
     window.addEventListener('mousemove', (e) => {
-      if (isRightDragging) {
+      if (isRightDragging && this.cameraMode === 'walk') {
         const dx = e.clientX - prevX;
+        const dy = e.clientY - prevY;
         prevX = e.clientX;
+        prevY = e.clientY;
         this.cameraOrbitAngle -= dx * 0.006;
+        this.cameraPitchAngle -= dy * 0.005;
+        this.cameraPitchAngle = Math.max(0.08, Math.min(1.38, this.cameraPitchAngle));
       }
     });
 
@@ -1941,12 +1949,13 @@ export class LPBarWorld {
     );
 
     // Touch interaction for Mobile:
-    // 1-finger drag on canvas orbits camera; tap walks or interacts; 2-finger pinch zooms
+    // 1-finger drag on canvas orbits camera horizontally & vertically; tap walks or interacts; 2-finger pinch zooms
     let touchStartX = 0;
     let touchStartY = 0;
     let touchStartTime = 0;
     let isTouchDragging = false;
     let lastTouchX = 0;
+    let lastTouchY = 0;
     let initialPinchDist = null;
     let initialZoomDist = 0;
 
@@ -1961,6 +1970,7 @@ export class LPBarWorld {
           touchStartX = t.clientX;
           touchStartY = t.clientY;
           lastTouchX = t.clientX;
+          lastTouchY = t.clientY;
           touchStartTime = performance.now();
           isTouchDragging = false;
         } else if (e.touches.length === 2) {
@@ -1984,9 +1994,13 @@ export class LPBarWorld {
           }
           if (isTouchDragging && this.cameraMode === 'walk') {
             const dx = t.clientX - lastTouchX;
+            const dy = t.clientY - lastTouchY;
             this.cameraOrbitAngle -= dx * 0.007;
+            this.cameraPitchAngle -= dy * 0.006;
+            this.cameraPitchAngle = Math.max(0.08, Math.min(1.38, this.cameraPitchAngle));
           }
           lastTouchX = t.clientX;
+          lastTouchY = t.clientY;
         } else if (e.touches.length === 2 && initialPinchDist) {
           const dx = e.touches[0].clientX - e.touches[1].clientX;
           const dy = e.touches[0].clientY - e.touches[1].clientY;
@@ -2325,11 +2339,22 @@ export class LPBarWorld {
 
   _updateCamera(dt) {
     if (this.cameraMode === 'walk') {
-      const offset = new THREE.Vector3(0, this.cameraZoomDist * 0.62, this.cameraZoomDist);
-      offset.applyAxisAngle(new THREE.Vector3(0, 1, 0), this.cameraOrbitAngle);
+      const focusY = 1.35;
+      const pitch = Math.max(0.08, Math.min(1.38, this.cameraPitchAngle || 0.50));
+      const dist = this.cameraZoomDist;
 
-      this.cameraTargetPos.copy(this.charPos).add(offset);
-      this.cameraTargetLook.set(this.charPos.x, 1.35, this.charPos.z - 1.2);
+      // Spherical coordinate offset around character focus point (elevation pitch & azimuth orbit)
+      const dy = dist * Math.sin(pitch);
+      const hDist = dist * Math.cos(pitch);
+      const dx = hDist * Math.sin(this.cameraOrbitAngle);
+      const dz = hDist * Math.cos(this.cameraOrbitAngle);
+
+      this.cameraTargetPos.set(
+        this.charPos.x + dx,
+        Math.max(0.55, focusY + dy),
+        this.charPos.z + dz
+      );
+      this.cameraTargetLook.set(this.charPos.x, focusY, this.charPos.z);
     }
 
     const lerpSpeed = Math.min(1, dt * 6.5);
