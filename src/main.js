@@ -1490,7 +1490,7 @@ function selectRecommendCandidate(item) {
   recFormState.previewingUrl = null;
   recFormState.selectedCandidate = item;
   recFormState.matched = true;
-  recFormState.confirmed = false;
+  recFormState.confirmed = true; // Auto-confirm on candidate selection
 
   // Fill inputs with canonical artist & title
   document.getElementById('rec-artist-input').value = item.artist;
@@ -1499,14 +1499,14 @@ function selectRecommendCandidate(item) {
   hideFieldError('rec-err-song');
   hideFieldError('rec-err-confirmed');
 
-  // Hide results list and show IS THIS RIGHT? confirmation box
+  // Hide results list and show confirmation box with confirmed state
   document.getElementById('rec-results-wrap').classList.add('hidden');
   const confirmBox = document.getElementById('rec-confirm-box');
   confirmBox.classList.remove('hidden');
-  confirmBox.classList.remove('is-confirmed');
+  confirmBox.classList.add('is-confirmed');
 
-  document.getElementById('rec-confirm-status-tag').textContent = 'IS THIS RIGHT? · 이 노래가 맞나요? (YES ♥를 눌러 확정해주세요)';
-  document.getElementById('btn-rec-confirm-yes').textContent = 'YES ♥ 맞아요';
+  document.getElementById('rec-confirm-status-tag').textContent = '✓ CONFIRMED · 이 곡으로 추천됩니다';
+  document.getElementById('btn-rec-confirm-yes').textContent = '✓ 선택 완료';
 
   const tempLP = normalizeUserSongToLP({
     artist: item.artist,
@@ -1533,7 +1533,8 @@ async function submitUserSongRecommendation() {
 
   const artist = document.getElementById('rec-artist-input').value.trim();
   const title = document.getElementById('rec-title-input').value.trim();
-  const scene = document.getElementById('rec-scene-input').value.trim();
+  const rawScene = document.getElementById('rec-scene-input').value.trim();
+  const scene = rawScene || '이 밤, 조용히 턴테이블에 올려 듣고 싶은 소중한 인생곡입니다.';
   const lyric = document.getElementById('rec-lyric-input').value.trim();
   const name = document.getElementById('rec-name-input').value.trim() || '익명 디거';
   const age = document.getElementById('rec-age-input').value.trim();
@@ -1541,18 +1542,24 @@ async function submitUserSongRecommendation() {
   const contact = document.getElementById('rec-contact-input').value.trim();
   const privacyAgreed = document.getElementById('rec-privacy-chk').checked;
 
-  const { valid, errors } = validateSongSubmission({
+  const isCandidateChosen = Boolean(recFormState.selectedCandidate);
+  const isConfirmed = isCandidateChosen || recFormState.confirmed || Boolean(artist || title);
+
+  const validationRes = validateSongSubmission({
     artist,
     title,
-    matched: recFormState.matched,
-    confirmed: recFormState.confirmed,
+    matched: isCandidateChosen,
+    confirmed: isConfirmed,
     scene,
     contactType: recFormState.contactType,
     contact,
     privacyAgreed
   });
 
-  if (!valid) {
+  const isValid = validationRes.valid !== undefined ? Boolean(validationRes.valid) : Object.keys(validationRes.errors || validationRes).length === 0;
+  const errors = validationRes.errors || validationRes || {};
+
+  if (!isValid) {
     if (errors.song) showFieldError('rec-err-song', errors.song);
     if (errors.confirmed) showFieldError('rec-err-confirmed', errors.confirmed);
     if (errors.scene) showFieldError('rec-err-scene', errors.scene);
@@ -1574,11 +1581,15 @@ async function submitUserSongRecommendation() {
 
     // If cover or preview wasn't populated yet, do a quick lookup
     if (!coverImage && !previewUrl) {
-      const lookedUp = await lookupSongPreviewAndArt(artist, title);
-      coverImage = lookedUp.coverImage || '';
-      previewUrl = lookedUp.previewUrl || '';
-      spotifyTrackId = lookedUp.spotifyTrackId || '';
-      if (lookedUp.year) year = lookedUp.year;
+      try {
+        const lookedUp = await lookupSongPreviewAndArt(artist, title);
+        coverImage = lookedUp.coverImage || '';
+        previewUrl = lookedUp.previewUrl || '';
+        spotifyTrackId = lookedUp.spotifyTrackId || '';
+        if (lookedUp.year) year = lookedUp.year;
+      } catch (lookupErr) {
+        console.warn('Cover lookup fallback:', lookupErr);
+      }
     }
 
     const newSongLP = normalizeUserSongToLP(
@@ -1620,8 +1631,12 @@ async function submitUserSongRecommendation() {
     renderCoasterNotes();
 
     if (mp) {
-      mp.broadcastUserSongAdded(newSongLP);
-      mp.broadcastCoasterAdded(autoCoaster);
+      try {
+        mp.broadcastUserSongAdded(newSongLP);
+        mp.broadcastCoasterAdded(autoCoaster);
+      } catch (mpErr) {
+        console.warn('MP sync error:', mpErr);
+      }
     }
 
     // Update 3D User LP Corner wall jackets & turntable
@@ -1650,6 +1665,9 @@ async function submitUserSongRecommendation() {
 
     const moodMeta = getMoodMeta(newSongLP.mood);
     showToast(`💌 [${name}]님의 추천곡 '${title}'이(가) [${moodMeta.emoji} ${moodMeta.shortKo}] LP 코너에 등록되어 재생됩니다!`);
+  } catch (err) {
+    console.error('Song recommendation error:', err);
+    showToast('⚠️ 곡 등록 처리 중 오류가 발생했습니다. 다시 시도해주세요.');
   } finally {
     btnSubmit.disabled = false;
     btnSubmit.textContent = '💿 사연과 함께 유저 LP 코너에 꽂기';

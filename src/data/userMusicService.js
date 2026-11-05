@@ -790,15 +790,12 @@ export function validateSongSubmission({
   const errors = {};
 
   if (!clean(artist) && !clean(title) && !matched) {
-    errors.song = '가수 또는 노래 제목 중 하나는 입력해주세요.';
+    errors.song = '가수 또는 노래 제목을 입력하거나 검색해주세요.';
   }
 
-  if (matched && !confirmed) {
-    errors.confirmed = '검색된 노래가 맞는지 [YES ♥ 맞아요] 버튼을 눌러 확인해주세요.';
-  }
-
-  if (!clean(scene)) {
-    errors.scene = '이 노래와 연결된 사연, 떠오르는 장면 또는 경험담을 적어주세요.';
+  // If user selected a song candidate, it is automatically matched & confirmed
+  if (matched && confirmed === false) {
+    errors.confirmed = '검색된 노래를 확인해주세요.';
   }
 
   if (clean(contact) && !isValidContact(contactType, contact)) {
@@ -809,7 +806,13 @@ export function validateSongSubmission({
     errors.privacy = '연락처를 입력한 경우 개인정보 수집에 동의해주세요.';
   }
 
-  return errors;
+  const valid = Object.keys(errors).length === 0;
+
+  return {
+    valid,
+    errors,
+    ...errors
+  };
 }
 
 // Recommend user songs by mood text (yourmusic's HomeScreen -> recommend-songs)
