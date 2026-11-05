@@ -381,37 +381,37 @@ function updateProximityPrompt(prox) {
   if (prox.type === 'user-corner') {
     badgeEl.textContent = 'YOUR MUSIC · 1ST-PERSON BOOTH';
     titleEl.textContent = '💌 찐 유저 추천 사연 LP 코너';
-    subEl.textContent = `유저들이 직접 남긴 사연과 인생곡 ${state.userSongs.length}장이 꽂혀 있습니다. 1인칭 시점으로 사연을 읽으며 감상하거나 나만의 노래를 추천해보세요!`;
-    btnLabel.textContent = '1인칭 사연 감상 & 청음 화면으로 전환';
+    subEl.textContent = `유저들이 직접 남긴 사연과 인생곡 ${state.userSongs.length}장이 꽂혀 있습니다. 사연을 읽으며 감상하거나 나만의 노래를 추천해보세요!`;
+    btnLabel.textContent = '사연 코너 보기';
     btnAction.onclick = () => world.enterUserCornerCloseup();
     if (mobileActIcon) mobileActIcon.textContent = '💌';
-    if (mobileActText) mobileActText.textContent = '사연 코너';
+    if (mobileActText) mobileActText.textContent = '사연 코너 보기';
   } else if (prox.type === 'shelf') {
     badgeEl.textContent = `${prox.data.code} · POPULAR VINYL RACK`;
     titleEl.textContent = `${prox.data.name} (${prox.data.koName})`;
     subEl.textContent = prox.data.subtitle;
-    btnLabel.textContent = '책장 정면 클로즈업으로 LP 둘러보기';
+    btnLabel.textContent = 'LP책장 보기';
     btnAction.onclick = () => world.enterShelfCloseup(prox.id);
     if (mobileActIcon) mobileActIcon.textContent = '📚';
-    if (mobileActText) mobileActText.textContent = '책장 디깅';
+    if (mobileActText) mobileActText.textContent = 'LP책장 보기';
   } else if (prox.type === 'table') {
     badgeEl.textContent = prox.data.typeLabel;
     titleEl.textContent = prox.data.name;
     if (state.heldLP) {
       subEl.textContent = `손에 든 [${state.heldLP.title}] LP를 이 테이블의 턴테이블에 올립니다`;
-      btnLabel.textContent = '테이블에 앉아서 LP판 올리고 재생하기';
+      btnLabel.textContent = 'LP 올리고 테이블 앉기';
       if (mobileActIcon) mobileActIcon.textContent = '💿';
       if (mobileActText) mobileActText.textContent = 'LP 올리기';
     } else if (prox.data.currentLP) {
       subEl.textContent = `현재 올려진 LP: ${prox.data.currentLP.title} (${prox.data.currentLP.artist})`;
-      btnLabel.textContent = '테이블에 앉아서 턴테이블 조작하기';
+      btnLabel.textContent = '테이블 앉기';
       if (mobileActIcon) mobileActIcon.textContent = '🛋️';
-      if (mobileActText) mobileActText.textContent = '테이블 착석';
+      if (mobileActText) mobileActText.textContent = '테이블 앉기';
     } else {
       subEl.textContent = prox.data.desc;
-      btnLabel.textContent = '이 테이블에 앉기';
+      btnLabel.textContent = '테이블 앉기';
       if (mobileActIcon) mobileActIcon.textContent = '🛋️';
-      if (mobileActText) mobileActText.textContent = '테이블 착석';
+      if (mobileActText) mobileActText.textContent = '테이블 앉기';
     }
     btnAction.onclick = () => world.sitAtTable(prox.id);
   }

@@ -67,8 +67,8 @@ export class LPBarWorld {
     // Multiplayer remote peers registry: peerId -> { group, rig, gender, labelSprite, currentPos, targetPos, currentRotY, targetRotY, isMoving, isSeated, seatedTableId, seatIndex, heldLPId, nickname, chatText, chatExpiresAt }
     this.remotePlayers = new Map();
 
-    // Auto shelf close-up state
-    this.autoShelfCloseup = true;
+    // Auto shelf close-up state (disabled - user interacts via on-screen button or E key)
+    this.autoShelfCloseup = false;
     this.lastExitedShelfId = null;
     this.activeShelfId = null;
     this.nearestInteractable = null;
@@ -2518,29 +2518,6 @@ export class LPBarWorld {
           dist: d
         };
       }
-    }
-
-    // Trigger Auto Close-up if walking right up to the User LP Corner or a Genre Bookshelf
-    if (
-      closest &&
-      closest.type === 'user-corner' &&
-      this.autoShelfCloseup &&
-      this.charPos.distanceTo(this.userCornerEntry.standPoint) < 1.85 &&
-      this.lastExitedShelfId !== 'user-corner'
-    ) {
-      this.enterUserCornerCloseup();
-      return;
-    }
-
-    if (
-      closest &&
-      closest.type === 'shelf' &&
-      this.autoShelfCloseup &&
-      closest.dist < 1.75 &&
-      this.lastExitedShelfId !== closest.id
-    ) {
-      this.enterShelfCloseup(closest.id);
-      return;
     }
 
     this.nearestInteractable = closest;

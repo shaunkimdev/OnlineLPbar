@@ -617,23 +617,41 @@ kbd {
 }
 
 .btn-proximity-primary {
-  background: linear-gradient(135deg, #d99b4e 0%, #b56c24 100%);
-  color: #180e06;
-  border: none;
-  border-radius: 10px;
-  padding: 9px 18px;
-  font-weight: 700;
-  font-size: 0.88rem;
+  background: linear-gradient(135deg, #e6a756 0%, #bd7324 100%);
+  color: #160b03;
+  border: 1px solid rgba(255, 235, 190, 0.45);
+  border-radius: 12px;
+  padding: 10px 22px;
+  font-weight: 800;
+  font-size: 0.95rem;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  justify-content: center;
+  gap: 10px;
+  box-shadow: 0 4px 18px rgba(217, 155, 78, 0.35);
+  transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
+}
+
+.btn-proximity-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 24px rgba(217, 155, 78, 0.55);
+  filter: brightness(1.08);
+}
+
+.btn-proximity-primary:active {
+  transform: translateY(0);
 }
 
 .btn-proximity-primary kbd {
-  background: rgba(0, 0, 0, 0.25);
+  background: rgba(0, 0, 0, 0.3);
   color: #fff;
-  border-color: rgba(255, 255, 255, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 6px;
+  padding: 2px 7px;
+  font-size: 0.76rem;
+  font-family: inherit;
+  font-weight: 700;
 }
 
 /* =========================================================================
