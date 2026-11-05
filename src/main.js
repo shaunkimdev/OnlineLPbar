@@ -330,67 +330,37 @@ function setLocationStatus(text) {
 }
 
 // =========================================================================
-// 3. PROXIMITY INTERACTION PROMPT
+// 3. PROXIMITY INTERACTION & MOBILE ACTION PROMPTS
 // =========================================================================
 function updateProximityPrompt(prox) {
-  const promptEl = document.getElementById('proximity-prompt');
   const mobileActBtn = document.getElementById('btn-mobile-interact');
   const mobileActIcon = document.getElementById('mobile-act-icon');
   const mobileActText = document.getElementById('mobile-act-text');
 
   if (!prox) {
-    promptEl.classList.add('hidden');
     if (mobileActBtn) mobileActBtn.classList.add('hidden');
     return;
   }
 
-  promptEl.classList.remove('hidden');
+  // Mobile contextual interaction button
   if (mobileActBtn && !state.seatedTable) {
     mobileActBtn.classList.remove('hidden');
   }
 
-  const badgeEl = document.getElementById('proximity-type');
-  const titleEl = document.getElementById('proximity-title');
-  const subEl = document.getElementById('proximity-sub');
-  const btnLabel = document.getElementById('proximity-btn-label');
-  const btnAction = document.getElementById('btn-proximity-action');
-
   if (prox.type === 'user-corner') {
-    badgeEl.textContent = 'YOUR MUSIC · 1ST-PERSON BOOTH';
-    titleEl.textContent = '💌 찐 유저 추천 사연 LP 코너';
-    subEl.textContent = `유저들이 직접 남긴 사연과 인생곡 ${state.userSongs.length}장이 꽂혀 있습니다. 사연을 읽으며 감상하거나 나만의 노래를 추천해보세요!`;
-    btnLabel.textContent = '사연 코너 보기';
-    btnAction.onclick = () => world.enterUserCornerCloseup();
     if (mobileActIcon) mobileActIcon.textContent = '💌';
     if (mobileActText) mobileActText.textContent = '사연 코너 보기';
   } else if (prox.type === 'shelf') {
-    badgeEl.textContent = `${prox.data.code} · POPULAR VINYL RACK`;
-    titleEl.textContent = `${prox.data.name} (${prox.data.koName})`;
-    subEl.textContent = prox.data.subtitle;
-    btnLabel.textContent = 'LP책장 보기';
-    btnAction.onclick = () => world.enterShelfCloseup(prox.id);
     if (mobileActIcon) mobileActIcon.textContent = '📚';
     if (mobileActText) mobileActText.textContent = 'LP책장 보기';
   } else if (prox.type === 'table') {
-    badgeEl.textContent = prox.data.typeLabel;
-    titleEl.textContent = prox.data.name;
     if (state.heldLP) {
-      subEl.textContent = `손에 든 [${state.heldLP.title}] LP를 이 테이블의 턴테이블에 올립니다`;
-      btnLabel.textContent = 'LP 올리고 테이블 앉기';
       if (mobileActIcon) mobileActIcon.textContent = '💿';
       if (mobileActText) mobileActText.textContent = 'LP 올리기';
-    } else if (prox.data.currentLP) {
-      subEl.textContent = `현재 올려진 LP: ${prox.data.currentLP.title} (${prox.data.currentLP.artist})`;
-      btnLabel.textContent = '테이블 앉기';
-      if (mobileActIcon) mobileActIcon.textContent = '🛋️';
-      if (mobileActText) mobileActText.textContent = '테이블 앉기';
     } else {
-      subEl.textContent = prox.data.desc;
-      btnLabel.textContent = '테이블 앉기';
       if (mobileActIcon) mobileActIcon.textContent = '🛋️';
       if (mobileActText) mobileActText.textContent = '테이블 앉기';
     }
-    btnAction.onclick = () => world.sitAtTable(prox.id);
   }
 }
 
@@ -478,7 +448,6 @@ function openShelfDiggingUI(shelfData) {
   // Hide user corner & table HUD & mobile joystick if open
   closeUserCornerUI(false);
   document.getElementById('table-turntable-hud').classList.add('hidden');
-  document.getElementById('proximity-prompt').classList.add('hidden');
   document.getElementById('mobile-controls-layer')?.classList.add('hidden');
 
   const overlay = document.getElementById('shelf-closeup-overlay');
@@ -846,7 +815,6 @@ function openUserCornerUI(targetSongId = null) {
   // Hide shelf or table HUD & mobile joystick if open
   closeShelfDiggingUI(false);
   document.getElementById('table-turntable-hud').classList.add('hidden');
-  document.getElementById('proximity-prompt').classList.add('hidden');
   document.getElementById('mobile-controls-layer')?.classList.add('hidden');
 
   if (targetSongId) {
@@ -1807,7 +1775,6 @@ function handleCharacterSatAtTable(tableData) {
   state.seatedTable = tableData;
   closeShelfDiggingUI(false);
   closeUserCornerUI(false);
-  document.getElementById('proximity-prompt').classList.add('hidden');
   document.getElementById('table-turntable-hud').classList.remove('hidden');
 
   const mobileLeaveBtn = document.getElementById('btn-mobile-leave');
@@ -2482,7 +2449,7 @@ function setupCustomLPModal() {
 }
 
 // =========================================================================
-// 9-B. REAL-TIME MULTIPLAYER SYNCHRONIZATION & LOUNGE CHAT
+// 9-B. REAL-TIME MULTIPLAYER SYNCHRONIZATION
 // =========================================================================
 // Remote data arrives from a public relay, so always escape before inserting into HTML
 function escapeHTML(value) {
@@ -2531,8 +2498,6 @@ function applyRemotePeerToWorld(peerData) {
 function setupMultiplayerSync() {
   const connBadge = document.getElementById('mp-conn-badge');
   const liveDot = document.getElementById('mp-live-dot');
-  const panelDot = document.getElementById('mp-panel-dot');
-  const seenPeerStatus = new Map();
 
   mp = new MultiplayerSync({
     // 1. Connection status
@@ -2542,31 +2507,20 @@ function setupMultiplayerSync() {
         connBadge.classList.toggle('online', connected);
       }
       if (liveDot) liveDot.classList.toggle('online', connected);
-      if (panelDot) panelDot.classList.toggle('online', connected);
     },
 
     // 2. Peer joins & state updates
     onPeerUpdate: (peerData, isNew) => {
       applyRemotePeerToWorld(peerData);
 
-      // Refresh peer chips only when a peer's visible status changes (not on every movement packet)
-      const statusKey = `${peerData.nickname}|${peerData.gender}|${peerData.isSeated}|${peerData.seatedTableId}`;
-      if (seenPeerStatus.get(peerData.peerId) !== statusKey) {
-        seenPeerStatus.set(peerData.peerId, statusKey);
-        renderPeerChips(mp.getPeersArray());
-      }
-
       if (isNew) {
         const nick = peerData.nickname || '새로운 디거';
-        appendChatMessage({ sender: 'system', text: `👋 [${nick}]님이 LP바에 입장했습니다.` });
         showToast(`👋 [${nick}]님이 LP바에 입장했습니다.`);
       }
     },
 
-    onPeerLeave: (peerId, peerData) => {
-      seenPeerStatus.delete(peerId);
+    onPeerLeave: (peerId) => {
       if (world) world.removeRemotePeer(peerId);
-      appendChatMessage({ sender: 'system', text: `🚪 [${peerData?.nickname || '디거'}]님이 퇴장했습니다.` });
 
       // If this peer was the DJ of any table, clear their DJ lock
       state.tables.forEach((t) => {
@@ -2585,21 +2539,12 @@ function setupMultiplayerSync() {
     },
 
     // 3. Online count
-    onPeersCountChange: (count, peers) => {
+    onPeersCountChange: (count) => {
       const onlineCountEl = document.getElementById('mp-online-count');
-      const panelCountEl = document.getElementById('mp-panel-count');
       if (onlineCountEl) onlineCountEl.textContent = String(count);
-      if (panelCountEl) panelCountEl.textContent = String(count);
-      renderPeerChips(peers);
     },
 
-    // 4. Chat messages (log + 3D speech bubble above the sender)
-    onChatMessage: (msg) => {
-      appendChatMessage(msg);
-      if (world && msg.peerId) world.showRemoteChatBubble(msg.peerId, msg.text);
-    },
-
-    // 5. Table turntable sync
+    // 4. Table turntable sync
     onTableUpdate: (payload) => {
       const table = state.tables.find((t) => t.id === payload.tableId);
       if (!table) return;
@@ -2667,7 +2612,6 @@ function setupMultiplayerSync() {
         renderUserCornerCrateCards(false);
       }
       const recName = newSong.recommender?.name || payload.nickname || '유저';
-      appendChatMessage({ sender: 'system', text: `💌 [${recName}]님이 새 사연곡 '${newSong.title}'을(를) 추천했습니다!` });
       showToast(`💌 [${recName}]님이 새 사연곡 '${newSong.title}'을(를) 추천했습니다!`);
     },
 
@@ -2764,100 +2708,6 @@ function setupMultiplayerSync() {
   const myNickEl = document.getElementById('mp-my-nickname');
   if (myNickEl) myNickEl.textContent = initialNick;
   if (world) world.updateLocalPlayerLabel(initialNick);
-
-  renderPeerChips([]);
-  setupChatUI();
-}
-
-function renderPeerChips(peers) {
-  const container = document.getElementById('mp-peer-chips');
-  if (!container) return;
-  container.innerHTML = '';
-
-  const myChip = document.createElement('div');
-  myChip.className = 'mp-peer-chip my-chip';
-  const myGenderIcon = world?.playerGender === 'female' ? '👧' : '👦';
-  myChip.innerHTML = `<span class="peer-gender">${myGenderIcon}</span><strong>${escapeHTML(getLocalNickname())}</strong><small>(나)</small>`;
-  container.appendChild(myChip);
-
-  (peers || []).forEach((peer) => {
-    const chip = document.createElement('div');
-    chip.className = 'mp-peer-chip';
-    const pGenderIcon = peer.gender === 'female' ? '👧' : '👦';
-    const tableName = peer.isSeated ? state.tables.find((t) => t.id === peer.seatedTableId)?.code : '';
-    const statusText = tableName ? ` · ${tableName} 착석` : '';
-    chip.innerHTML = `<span class="peer-gender">${pGenderIcon}</span><span>${escapeHTML(peer.nickname || '디거')}</span><small>${escapeHTML(statusText)}</small>`;
-    container.appendChild(chip);
-  });
-}
-
-function appendChatMessage(msg) {
-  const container = document.getElementById('mp-chat-messages');
-  if (!container) return;
-
-  const div = document.createElement('div');
-  if (msg.sender === 'system') {
-    div.className = 'mp-msg mp-msg-system';
-    div.innerHTML = `<span>${escapeHTML(msg.text)}</span>`;
-  } else {
-    const isMe = msg.peerId && msg.peerId === mp?.peerId;
-    div.className = `mp-msg ${isMe ? 'mp-msg-mine' : 'mp-msg-peer'}`;
-    const timeStr = new Date(msg.ts || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    div.innerHTML = `
-      <div class="mp-msg-sender">${isMe ? '★ 나' : escapeHTML(msg.nickname || '디거')} <time>${timeStr}</time></div>
-      <div class="mp-msg-content">${escapeHTML(msg.text)}</div>
-    `;
-  }
-  container.appendChild(div);
-
-  // Keep the log bounded
-  while (container.children.length > 80) {
-    container.removeChild(container.firstChild);
-  }
-  container.scrollTop = container.scrollHeight;
-}
-
-function setupChatUI() {
-  const panel = document.getElementById('mp-chat-panel');
-  const btnToggle = document.getElementById('btn-toggle-mp-chat');
-  const pillBtn = document.getElementById('mp-online-pill');
-  const chatForm = document.getElementById('mp-chat-form');
-  const chatInput = document.getElementById('mp-chat-input');
-
-  const togglePanel = () => {
-    if (!panel) return;
-    panel.classList.toggle('collapsed');
-    if (btnToggle) {
-      btnToggle.textContent = panel.classList.contains('collapsed') ? '▴' : '▾';
-    }
-  };
-
-  if (btnToggle) btnToggle.addEventListener('click', togglePanel);
-  if (pillBtn) pillBtn.addEventListener('click', togglePanel);
-
-  if (chatForm && chatInput) {
-    chatForm.addEventListener('submit', (e) => {
-      e.preventDefault();
-      const text = chatInput.value.trim();
-      if (!text) return;
-
-      if (mp) mp.broadcastChatMessage(text);
-      if (world) world.updateLocalPlayerLabel(getLocalNickname(), text);
-      appendChatMessage({
-        peerId: mp?.peerId,
-        nickname: getLocalNickname(),
-        text,
-        ts: Date.now()
-      });
-      chatInput.value = '';
-      // Return focus to the 3D world so WASD works immediately after sending
-      chatInput.blur();
-    });
-
-    chatInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') chatInput.blur();
-    });
-  }
 }
 
 // =========================================================================

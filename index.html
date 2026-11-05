@@ -78,12 +78,12 @@
         <span id="location-status-text">LP바 라운지 산책 중</span>
       </div>
 
-      <button type="button" class="mp-online-pill" id="mp-online-pill" title="실시간 접속자 목록 및 라운지 대화창 열기/닫기">
+      <div class="mp-online-pill" id="mp-online-pill" title="실시간 라운지 동기화 현황">
         <span class="mp-live-dot" id="mp-live-dot"></span>
         <span>실시간 접속 <strong id="mp-online-count">1</strong>명</span>
         <span class="mp-nick-divider">·</span>
         <span id="mp-my-nickname">익명의 디거</span>
-      </button>
+      </div>
 
       <!-- Held LP indicator when character is carrying a record -->
       <div class="held-lp-pill hidden" id="held-lp-pill">
@@ -140,17 +140,6 @@
     </ul>
   </aside>
 
-  <!-- Floating Proximity Prompt (Appears near Shelf or Table) -->
-  <div id="proximity-prompt" class="proximity-prompt hidden">
-    <div class="proximity-badge" id="proximity-type">LP SHELF</div>
-    <div class="proximity-title" id="proximity-title">JAZZ &amp; BLUE NOTE 책장</div>
-    <div class="proximity-sub" id="proximity-sub">가까이 가서 정면 시점으로 인기 LP들을 둘러보세요</div>
-    <div class="proximity-actions">
-      <button id="btn-proximity-action" class="btn-proximity-primary">
-        <kbd>E</kbd> <span id="proximity-btn-label">LP책장 보기</span>
-      </button>
-    </div>
-  </div>
 
   <!-- ==============================================================
        SHELF CLOSE-UP DIGGING VIEW (1st-Person Front-Facing LP Browsing)
@@ -762,44 +751,6 @@
     </div>
   </div>
 
-  <!-- ==============================================================
-       REAL-TIME MULTIPLAYER LOUNGE CHAT & CONNECTED PEERS PANEL
-       ============================================================== -->
-  <aside id="mp-chat-panel" class="mp-chat-panel">
-    <div class="mp-chat-header" id="mp-chat-header">
-      <div class="mp-chat-title-wrap">
-        <span class="mp-live-dot" id="mp-panel-dot"></span>
-        <strong>실시간 라운지 멀티플레이</strong>
-        <span class="mp-conn-badge" id="mp-conn-badge">동기화 중</span>
-      </div>
-      <div class="mp-chat-header-right">
-        <span class="mp-count-tag"><strong id="mp-panel-count">1</strong>명 접속</span>
-        <button type="button" id="btn-toggle-mp-chat" class="btn-mp-minimize" title="대화창 접기/펼치기">▾</button>
-      </div>
-    </div>
-
-    <div class="mp-chat-body" id="mp-chat-body">
-      <div class="mp-peer-chips" id="mp-peer-chips">
-        <!-- Dynamically populated online player chips -->
-      </div>
-
-      <div class="mp-chat-messages" id="mp-chat-messages">
-        <div class="mp-msg mp-msg-system">
-          <span>🌐 실시간 멀티플레이 라운지에 연결되었습니다. 다른 접속자와 캐릭터 이동·테이블 턴테이블·대화 말풍선이 실시간 동기화됩니다.</span>
-        </div>
-      </div>
-
-      <form id="mp-chat-form" class="mp-chat-form" autocomplete="off">
-        <input
-          type="text"
-          id="mp-chat-input"
-          placeholder="라운지에 대화 건네기 (캐릭터 머리 위 말풍선 표시)..."
-          maxlength="80"
-        />
-        <button type="submit" id="btn-mp-chat-send">전송</button>
-      </form>
-    </div>
-  </aside>
 
   <!-- ==============================================================
        MOBILE TOUCH CONTROLS (Virtual Joystick & Floating Action Group)

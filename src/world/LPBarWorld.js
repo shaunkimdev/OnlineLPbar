@@ -58,13 +58,11 @@ export class LPBarWorld {
     this.seatedChairIndex = 0;
     this.heldLP = null;
     this.localNickname = '익명의 디거';
-    this.localChatText = '';
-    this.localChatExpiresAt = 0;
 
     // Mobile & Touch controls
     this.joystickVector = new THREE.Vector2(0, 0);
 
-    // Multiplayer remote peers registry: peerId -> { group, rig, gender, labelSprite, currentPos, targetPos, currentRotY, targetRotY, isMoving, isSeated, seatedTableId, seatIndex, heldLPId, nickname, chatText, chatExpiresAt }
+    // Multiplayer remote peers registry: peerId -> { group, rig, gender, labelSprite, currentPos, targetPos, currentRotY, targetRotY, isMoving, isSeated, seatedTableId, seatIndex, heldLPId, nickname }
     this.remotePlayers = new Map();
 
     // Auto shelf close-up state (disabled - user interacts via on-screen button or E key)
@@ -1534,8 +1532,8 @@ export class LPBarWorld {
 
   _createPlayerHeadSprite(nickname, isLocal = false) {
     const canvas = document.createElement('canvas');
-    canvas.width = 512;
-    canvas.height = 176;
+    canvas.width = 440;
+    canvas.height = 88;
     const ctx = canvas.getContext('2d');
 
     const tex = new THREE.CanvasTexture(canvas);
@@ -1546,62 +1544,28 @@ export class LPBarWorld {
       depthTest: false
     });
     const sprite = new THREE.Sprite(mat);
-    sprite.scale.set(2.35, 0.81, 1);
+    sprite.scale.set(2.2, 0.44, 1);
     sprite.renderOrder = 25;
     sprite.userData = { canvas, ctx, tex, isLocal };
 
-    this._drawPlayerHeadCanvas(sprite, nickname, '');
+    this._drawPlayerHeadCanvas(sprite, nickname);
     return sprite;
   }
 
-  _drawPlayerHeadCanvas(sprite, nickname, chatText = '') {
+  _drawPlayerHeadCanvas(sprite, nickname) {
     if (!sprite || !sprite.userData) return;
     const { canvas, ctx, tex, isLocal } = sprite.userData;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     const safeName = (nickname || '익명의 디거').slice(0, 18);
-    const safeChat = (chatText || '').trim().slice(0, 56);
 
-    // 1) Draw speech bubble at top if chatText is active
-    if (safeChat) {
-      ctx.font = '600 22px "Noto Sans KR", sans-serif';
-      const maxBubbleW = 480;
-      const textMetrics = ctx.measureText(safeChat);
-      const bubbleW = Math.min(maxBubbleW, Math.max(150, textMetrics.width + 44));
-      const bubbleH = 68;
-      const bx = (canvas.width - bubbleW) / 2;
-      const by = 8;
-
-      ctx.fillStyle = 'rgba(255, 250, 240, 0.96)';
-      ctx.strokeStyle = isLocal ? '#f59e0b' : '#a78bfa';
-      ctx.lineWidth = 4;
-      ctx.beginPath();
-      ctx.roundRect(bx, by, bubbleW, bubbleH, 18);
-      ctx.fill();
-      ctx.stroke();
-
-      // Little speech bubble tail
-      ctx.beginPath();
-      ctx.moveTo(canvas.width / 2 - 10, by + bubbleH);
-      ctx.lineTo(canvas.width / 2 + 10, by + bubbleH);
-      ctx.lineTo(canvas.width / 2, by + bubbleH + 12);
-      ctx.closePath();
-      ctx.fill();
-
-      ctx.fillStyle = '#1c120c';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      const displayChat = safeChat.length > 23 ? safeChat.slice(0, 22) + '…' : safeChat;
-      ctx.fillText(`💬 ${displayChat}`, canvas.width / 2, by + bubbleH / 2 + 1);
-    }
-
-    // 2) Draw Nameplate pill near bottom
+    // Draw Nameplate pill centered
     ctx.font = '700 22px "Noto Sans KR", sans-serif';
     const labelText = isLocal ? `★ ${safeName} (나)` : `🟢 ${safeName}`;
-    const nameW = Math.min(440, Math.max(140, ctx.measureText(labelText).width + 38));
+    const nameW = Math.min(420, Math.max(140, ctx.measureText(labelText).width + 38));
     const nameH = 44;
     const nx = (canvas.width - nameW) / 2;
-    const ny = 114;
+    const ny = (canvas.height - nameH) / 2;
 
     ctx.fillStyle = isLocal ? 'rgba(34, 21, 12, 0.88)' : 'rgba(18, 22, 34, 0.88)';
     ctx.strokeStyle = isLocal ? 'rgba(255, 190, 92, 0.85)' : 'rgba(124, 212, 184, 0.8)';
@@ -1619,15 +1583,11 @@ export class LPBarWorld {
     tex.needsUpdate = true;
   }
 
-  updateLocalPlayerLabel(nickname, chatText = null) {
+  updateLocalPlayerLabel(nickname) {
     if (nickname) {
       this.localNickname = nickname;
     }
-    if (chatText !== null) {
-      this.localChatText = chatText;
-      this.localChatExpiresAt = chatText ? performance.now() + 6800 : 0;
-    }
-    this._drawPlayerHeadCanvas(this.localHeadSprite, this.localNickname, this.localChatText);
+    this._drawPlayerHeadCanvas(this.localHeadSprite, this.localNickname);
   }
 
   _notifyLocalTransformChange(forceImmediate = false, isMoving = false) {
@@ -1689,9 +1649,7 @@ export class LPBarWorld {
         seatedTableId: null,
         seatIndex: 0,
         heldLPId: null,
-        nickname: peerData.nickname || '익명의 디거',
-        chatText: '',
-        chatExpiresAt: 0
+        nickname: peerData.nickname || '익명의 디거'
       };
       this.remotePlayers.set(peerId, entry);
     }
@@ -1744,22 +1702,15 @@ export class LPBarWorld {
       }
     }
 
-    // Update nickname label if changed (speech bubbles are driven by showRemoteChatBubble)
+    // Update nickname label if changed
     const nextNick = String(peerData.nickname || '익명의 디거').slice(0, 18);
     if (entry.nickname !== nextNick) {
       entry.nickname = nextNick;
-      this._drawPlayerHeadCanvas(entry.labelSprite, entry.nickname, entry.chatText);
+      this._drawPlayerHeadCanvas(entry.labelSprite, entry.nickname);
     }
   }
 
-  // Show a 3D speech bubble above a remote peer (expiry uses local clock to avoid cross-device clock skew)
-  showRemoteChatBubble(peerId, text) {
-    const entry = this.remotePlayers.get(peerId);
-    if (!entry) return;
-    entry.chatText = String(text || '').slice(0, 56);
-    entry.chatExpiresAt = performance.now() + 6800;
-    this._drawPlayerHeadCanvas(entry.labelSprite, entry.nickname, entry.chatText);
-  }
+  showRemoteChatBubble() {}
 
   removeRemotePeer(peerId) {
     const entry = this.remotePlayers.get(peerId);
@@ -1769,14 +1720,6 @@ export class LPBarWorld {
   }
 
   _updateRemotePlayers(dt, elapsed) {
-    const now = performance.now();
-
-    // Expire local speech bubble if needed
-    if (this.localChatText && now > this.localChatExpiresAt) {
-      this.localChatText = '';
-      this._drawPlayerHeadCanvas(this.localHeadSprite, this.localNickname, '');
-    }
-
     for (const entry of this.remotePlayers.values()) {
       // Smoothly interpolate position
       const dist = entry.currentPos.distanceTo(entry.targetPos);
@@ -1801,12 +1744,6 @@ export class LPBarWorld {
         hasHeldLP: Boolean(entry.heldLPId),
         elapsed
       });
-
-      // Expire remote speech bubble when timer finishes
-      if (entry.chatText && entry.chatExpiresAt && now > entry.chatExpiresAt) {
-        entry.chatText = '';
-        this._drawPlayerHeadCanvas(entry.labelSprite, entry.nickname, '');
-      }
     }
   }
 
