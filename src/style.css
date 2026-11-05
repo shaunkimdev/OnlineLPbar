@@ -496,85 +496,86 @@ kbd {
 }
 
 /* =========================================================================
-   LEFT ZONE NAVIGATION & CONTROLS GUIDE
+   CONTROLS GUIDE PANEL (Left Side with Close Button)
    ========================================================================= */
-.zone-nav-panel {
+.controls-guide-panel {
   position: fixed;
   top: 84px;
   left: 18px;
   z-index: 25;
-  width: 230px;
+  width: 240px;
+  background: rgba(16, 11, 8, 0.88);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(217, 155, 78, 0.28);
+  border-radius: 14px;
+  padding: 12px 14px;
+  font-size: 0.76rem;
+  color: var(--text-muted);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.controls-guide-panel.hidden {
+  display: none !important;
+}
+
+.controls-guide-header {
   display: flex;
-  flex-direction: column;
-  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid rgba(217, 155, 78, 0.16);
 }
 
-.panel-section-title {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 0.7rem;
-  letter-spacing: 0.1em;
-  color: var(--gold);
-  padding-left: 4px;
+.guide-title {
+  font-weight: 700;
+  font-size: 0.82rem;
+  color: var(--gold-light);
+  letter-spacing: 0.04em;
 }
 
-.zone-btn-group {
+.btn-guide-close {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 0.95rem;
+  line-height: 1;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.btn-guide-close:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+
+.controls-guide-panel ul {
+  list-style: none;
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
 
-.zone-btn {
-  background: var(--bg-panel);
-  backdrop-filter: blur(10px);
-  border: 1px solid var(--border-brass);
-  border-radius: 11px;
-  padding: 10px 12px;
-  text-align: left;
-  color: var(--cream);
-  cursor: pointer;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  transition: all 0.16s ease;
+.controls-guide-panel li {
+  line-height: 1.45;
 }
 
-.zone-btn span {
-  font-size: 0.85rem;
-  font-weight: 600;
-}
-
-.zone-btn small {
+.controls-guide-panel kbd {
+  background: rgba(0, 0, 0, 0.4);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 4px;
+  padding: 1px 5px;
   font-size: 0.72rem;
-  color: var(--text-muted);
-}
-
-.zone-btn:hover,
-.zone-btn.active {
-  border-color: var(--border-brass-bright);
-  background: rgba(54, 34, 21, 0.92);
-}
-
-.controls-guide-box {
-  background: rgba(16, 11, 8, 0.82);
-  backdrop-filter: blur(8px);
-  border: 1px solid rgba(217, 155, 78, 0.24);
-  border-radius: 12px;
-  padding: 12px 14px;
-  font-size: 0.76rem;
-  color: var(--text-muted);
-}
-
-.guide-title {
-  font-weight: 700;
-  color: var(--gold-light);
-  margin-bottom: 6px;
-}
-
-.controls-guide-box ul {
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
+  font-family: inherit;
 }
 
 /* =========================================================================
@@ -3179,69 +3180,9 @@ input[type='range'] {
     flex-shrink: 0;
   }
 
-  .auto-closeup-toggle {
-    padding: 6px 10px;
-    font-size: 0.74rem;
-    white-space: nowrap;
-    flex-shrink: 0;
-  }
-
-  /* Left Zone Panel -> Horizontal Mobile Strip */
-  .zone-nav-panel {
-    top: auto;
-    bottom: 12px;
-    left: 50%;
-    transform: translateX(-50%);
-    width: calc(100% - 24px);
-    max-width: 520px;
-    flex-direction: row;
-    gap: 6px;
-    z-index: 28;
-    pointer-events: none;
-  }
-
-  .panel-section-title,
-  .controls-guide-box {
+  /* Controls guide hidden by default on mobile screens */
+  .controls-guide-panel {
     display: none !important;
-  }
-
-  .zone-btn-group {
-    flex-direction: row;
-    overflow-x: auto;
-    width: 100%;
-    padding: 4px;
-    background: rgba(18, 12, 8, 0.88);
-    backdrop-filter: blur(12px);
-    border: 1px solid var(--border-brass);
-    border-radius: 999px;
-    pointer-events: auto;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
-  }
-
-  .zone-btn-group::-webkit-scrollbar {
-    display: none;
-  }
-
-  .zone-btn {
-    flex-shrink: 0;
-    padding: 6px 10px;
-    border-radius: 999px;
-    white-space: nowrap;
-    border: none;
-    background: transparent;
-  }
-
-  .zone-btn span {
-    font-size: 0.76rem;
-  }
-
-  .zone-btn small {
-    display: none;
-  }
-
-  .zone-btn.active {
-    background: rgba(217, 155, 78, 0.25);
-    border: 1px solid var(--border-brass-bright);
   }
 
   /* Proximity prompt centered higher to not collide with joystick */

@@ -106,10 +106,9 @@
         <span>👦 캐릭터: <strong id="current-gender-label">남자아이</strong></span>
       </button>
 
-      <label class="auto-closeup-toggle" title="책장이나 유저 LP 코너 가까이 걸어가면 자동으로 1인칭 클로즈업 시점으로 전환합니다">
-        <input type="checkbox" id="chk-auto-closeup" checked />
-        <span>접근 시 자동 1인칭</span>
-      </label>
+      <button class="hud-btn" id="btn-toggle-controls-guide" title="조작 안내 열기/닫기">
+        <span>🎮 조작 안내</span>
+      </button>
 
       <div class="mood-selector">
         <button class="hud-btn" id="btn-mood-cycle" title="조명 분위기 전환">
@@ -127,41 +126,18 @@
     </div>
   </header>
 
-  <!-- Quick Zone Teleport / Camera Bar (Left Side) -->
-  <aside class="zone-nav-panel">
-    <div class="panel-section-title">빠른 시점 / 구역 이동</div>
-    <div class="zone-btn-group">
-      <button class="zone-btn active" data-zone="walk" id="btn-zone-walk">
-        <span>🚶 캐릭터 이동 시점</span>
-        <small>WASD / 마우스 클릭</small>
-      </button>
-      <button class="zone-btn zone-btn-user-corner" data-zone="user-corner" id="btn-zone-user-corner">
-        <span>💌 찐 유저 추천 LP 코너</span>
-        <small>1인칭 사연 감상 &amp; 노래 청음</small>
-      </button>
-      <button class="zone-btn" data-zone="shelves" id="btn-zone-shelves">
-        <span>📚 앞쪽 장르별 LP 책장</span>
-        <small>6개 장르 인기 LP 디깅</small>
-      </button>
-      <button class="zone-btn" data-zone="tables-2p" id="btn-zone-2p">
-        <span>🥂 2인석 테이블 구역</span>
-        <small>테이블 A1 ~ A4 (턴테이블)</small>
-      </button>
-      <button class="zone-btn" data-zone="tables-4p" id="btn-zone-4p">
-        <span>🛋️ 4인석 부스 테이블 구역</span>
-        <small>테이블 B1 ~ B4 (턴테이블)</small>
-      </button>
+  <!-- Controls Guide (Left Side) with Close Button -->
+  <aside class="controls-guide-panel" id="controls-guide-panel">
+    <div class="controls-guide-header">
+      <span class="guide-title">🎮 조작 안내</span>
+      <button type="button" class="btn-guide-close" id="btn-close-controls-guide" title="조작 안내 닫기">✕</button>
     </div>
-
-    <div class="controls-guide-box">
-      <div class="guide-title">조작 안내</div>
-      <ul>
-        <li><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> / <kbd>방향키</kbd> 캐릭터 이동</li>
-        <li><strong>바닥/책장/테이블 클릭</strong> 자동 걸어가기</li>
-        <li><kbd>E</kbd> 또는 <kbd>Space</kbd> 책장 디깅 / 테이블 착석</li>
-        <li><strong>마우스 우클릭 드래그</strong> 카메라 360° 수평·수직 회전 · <strong>휠</strong> 줌</li>
-      </ul>
-    </div>
+    <ul>
+      <li><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> / <kbd>방향키</kbd> 캐릭터 이동</li>
+      <li><strong>바닥/책장/테이블 클릭</strong> 자동 걸어가기</li>
+      <li><kbd>E</kbd> 또는 <kbd>Space</kbd> 책장 보기 / 테이블 앉기</li>
+      <li><strong>마우스 우클릭 드래그</strong> 360° 시점 회전 · <strong>휠</strong> 줌</li>
+    </ul>
   </aside>
 
   <!-- Floating Proximity Prompt (Appears near Shelf or Table) -->

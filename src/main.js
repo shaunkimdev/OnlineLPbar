@@ -266,15 +266,22 @@ function setupTopHUD() {
     });
   }
 
-  const chkAuto = document.getElementById('chk-auto-closeup');
-  chkAuto.addEventListener('change', (e) => {
-    world.autoShelfCloseup = e.target.checked;
-    showToast(
-      e.target.checked
-        ? '📚 책장 및 유저 LP 코너 접근 시 자동 1인칭 클로즈업이 켜졌습니다.'
-        : '📚 책장 및 유저 LP 코너 접근 시 E키 또는 클릭으로 전환합니다.'
-    );
-  });
+  // Controls guide close / toggle
+  const guidePanel = document.getElementById('controls-guide-panel');
+  const btnCloseGuide = document.getElementById('btn-close-controls-guide');
+  const btnToggleGuide = document.getElementById('btn-toggle-controls-guide');
+
+  if (btnCloseGuide && guidePanel) {
+    btnCloseGuide.addEventListener('click', () => {
+      guidePanel.classList.add('hidden');
+    });
+  }
+
+  if (btnToggleGuide && guidePanel) {
+    btnToggleGuide.addEventListener('click', () => {
+      guidePanel.classList.toggle('hidden');
+    });
+  }
 
   // Mood lighting cycle
   const btnMood = document.getElementById('btn-mood-cycle');
@@ -292,36 +299,6 @@ function setupTopHUD() {
   document.getElementById('btn-drop-lp').addEventListener('click', () => {
     setHeldLP(null);
     showToast('손에 들고 있던 LP판을 내려놓았습니다.');
-  });
-
-  // Left Zone Navigation Buttons
-  const zoneBtns = document.querySelectorAll('.zone-btn');
-  zoneBtns.forEach((btn) => {
-    btn.addEventListener('click', () => {
-      zoneBtns.forEach((b) => b.classList.remove('active'));
-      btn.classList.add('active');
-      const zone = btn.dataset.zone;
-      closeShelfDiggingUI(false);
-      closeUserCornerUI(false);
-      closeTableTurntableHUD(false);
-      world.focusZone(zone);
-
-      if (zone === 'user-corner') {
-        showToast('💌 찐 유저 추천 사연 LP 코너 (1인칭 감상 부스)로 이동했습니다.');
-      } else if (zone === 'shelves') {
-        showToast('📚 앞쪽 장르별 인기 LP 책장 구역으로 이동했습니다.');
-      } else if (zone === 'tables-2p') {
-        showToast('🥂 2인석 테이블 구역 (Table A-1 ~ A-4)으로 이동했습니다.');
-      } else if (zone === 'tables-4p') {
-        showToast('🛋️ 4인석 부스 테이블 구역 (Table B-1 ~ B-4)으로 이동했습니다.');
-      }
-    });
-  });
-}
-
-function highlightZoneButton(zoneKey) {
-  document.querySelectorAll('.zone-btn').forEach((btn) => {
-    btn.classList.toggle('active', btn.dataset.zone === zoneKey);
   });
 }
 
@@ -3025,23 +3002,38 @@ function setupGlobalHotkeys() {
 
     // D) Quick Zone Number Shortcuts (1 ~ 5) while walking
     if (code === 'Digit1' || key === '1') {
-      document.getElementById('btn-zone-walk')?.click();
+      closeShelfDiggingUI(false);
+      closeUserCornerUI(false);
+      closeTableTurntableHUD(false);
+      world.focusZone('walk');
       return;
     }
     if (code === 'Digit2' || key === '2') {
-      document.getElementById('btn-zone-user-corner')?.click();
+      closeShelfDiggingUI(false);
+      closeUserCornerUI(false);
+      closeTableTurntableHUD(false);
+      world.focusZone('user-corner');
       return;
     }
     if (code === 'Digit3' || key === '3') {
-      document.getElementById('btn-zone-shelves')?.click();
+      closeShelfDiggingUI(false);
+      closeUserCornerUI(false);
+      closeTableTurntableHUD(false);
+      world.focusZone('shelves');
       return;
     }
     if (code === 'Digit4' || key === '4') {
-      document.getElementById('btn-zone-2p')?.click();
+      closeShelfDiggingUI(false);
+      closeUserCornerUI(false);
+      closeTableTurntableHUD(false);
+      world.focusZone('tables-2p');
       return;
     }
     if (code === 'Digit5' || key === '5') {
-      document.getElementById('btn-zone-4p')?.click();
+      closeShelfDiggingUI(false);
+      closeUserCornerUI(false);
+      closeTableTurntableHUD(false);
+      world.focusZone('tables-4p');
       return;
     }
 
